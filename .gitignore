@@ -22,5 +22,6 @@ $RECYCLE.BIN/
 # Operating System Files
 # =========================
 **.idea/
-
+**Audio-Classification-master
+**youtube
 **__pycache__
