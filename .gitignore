@@ -22,6 +22,9 @@ $RECYCLE.BIN/
 # Operating System Files
 # =========================
 **.idea/
+**/workspace.*
 **Audio-Classification-master
 **youtube
 **__pycache__
+3f22c5ed5dabf1815f16efa8fa53d476-8005b8d3047352d3aeba42172ebdd87136e0d609 (1).zip
+wavo.py
