@@ -11,9 +11,17 @@ from keras.utils import to_categorical
 from sklearn.utils.class_weight import compute_class_weight
 from tqdm import tqdm
 from python_speech_features import mfcc
+import soundfile as sf
+import preprocess_data
+
 
 
 def parse_arguments():
+    """
+    Choose what model to use. Either 'conv' for convolutional model
+    or 'time' for a recurrent lstm model.
+    :return:
+    """
     parser = argparse.ArgumentParser()
     # Set up arguments
 
@@ -27,16 +35,26 @@ def parse_arguments():
 
 def build_rand_feat(config, df, n_samples, classes, class_dist, prob_dist):
     """
-    Builds and shapes the data according to the mode chosen
+    Builds and shapes the data according to the mode chosen.
+
+    Randomly samples the audio sample every n/second.
+    The sample is converted to a spectogram and appended into an list of X and Y
+    and is to be used as features to train the model.
+    A normal sample length could be 1/10th of a second, but one could
+    always try more or less.
     :return:
     """
     X = []
     y = []
     _min, _max = float('inf'), -float('inf')
+    i = 0
+
     for _ in tqdm(range(n_samples)):
         rand_class = np.random.choice(class_dist.index, p=prob_dist)
         file = np.random.choice(df[df.label == rand_class].index)
-        rate, wav = wavfile.read('clean/'+file)
+        fold = df.loc[df.index == file, 'fold'].iloc[0]
+        wav, rate = sf.read(f'../Datasets/audio/fold{fold}/{file}')
+        # rate, wav = sf.read('clean/'+file)
         label = df.at[file, 'label']
         rand_index = np.random.randint(0, wav.shape[0]-config.step)
         sample = wav[rand_index:rand_index+config.step]
@@ -51,8 +69,31 @@ def build_rand_feat(config, df, n_samples, classes, class_dist, prob_dist):
         X.append(X_sample if config.mode == 'conv' else X_sample.T)
         y.append(classes.index(label))
 
+
     # Normalize X and y
-    X, y = np.array(X), np.array(y)
+    for i, array in enumerate(X):
+        if array.shape != np.zeros((13, 9)).shape:
+            del X[i]
+        else:
+            print(array)
+
+    for i, array in enumerate(X):
+        if array.shape != np.zeros((13, 9)).shape:
+            print(array.shape)
+            del X[i]
+
+    for i, array in enumerate(X):
+        if array.shape != np.zeros((13, 9)).shape:
+            print(array.shape)
+            del X[i]
+
+    for i, array in enumerate(X):
+        if array.shape != np.zeros((13, 9)).shape:
+            print(array.shape)
+            del X[i]
+
+    y = np.array(y)
+    X = np.array(X)
     X = (X - _min) / (_max - _min)
 
     # Reshape X based on 'conv' mode or 'time' mode
@@ -131,7 +172,7 @@ class Config:
     """
     Class for hyper parameters
     """
-    def __init__(self, mode='conv', nfilt=26, nfeat=13, nfft=512, rate=16000):
+    def __init__(self, mode='conv', nfilt=26, nfeat=13, nfft=2400, rate=22050):
 
         self.mode = mode
         self.nfilt = nfilt
@@ -144,20 +185,47 @@ class Config:
 def main():
 
     args = parse_arguments()
-    df = pd.read_csv('instruments.csv')
-    df.set_index('fname', inplace=True)
+    # Create dataframe
+    df = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K.csv')
 
-    for f in df.index:
-        rate, signal = wavfile.read('clean/'+f)
-        df.at[f, 'length'] = signal.shape[0]/rate
+    # Format data and add a 'length' column
+    df.set_index('slice_file_name', inplace=True)
+    df = preprocess_data.add_length_to_column(df)
 
     classes = list(np.unique(df.label))
     class_dist = df.groupby(['label'])['length'].mean()
 
-    n_samples = 2 * int(df['length'].sum()/0.1)
+    # Is set to 1000 for testing purposes
+    # n_samples = 2 * int(df['length'].sum()/0.1)
+    n_samples = 200
     prob_dist = class_dist / class_dist.sum()
 
-    # choices = np.random.choice(class_dist.index, p=prob_dist)
+    list_of_arrays = []
+
+    for i in range(1000):
+        add_diff_shape = np.random.randint(0, 100)
+        if add_diff_shape > 90:
+            new_shape = np.random.randint(6, 14)
+            list_of_arrays.append(np.random.rand(13, new_shape))
+        else:
+            list_of_arrays.append(np.random.rand(13, 9))
+
+
+    for i, array in enumerate(list_of_arrays):
+        if array.shape != np.zeros((13, 9)).shape:
+            del list_of_arrays[i]
+
+        else:
+            print(array.shape)
+
+    for i, array in enumerate(list_of_arrays):
+        if array.shape != np.zeros((13, 9)).shape:
+            print(array.shape)
+            del list_of_arrays[i]
+    list_of_arrays = np.array(list_of_arrays)
+
+
+    choices = np.random.choice(class_dist.index, p=prob_dist)
 
     # Plot the label distribution
     fig, ax = plt.subplots()
@@ -195,6 +263,7 @@ def main():
 
 
 main()
+
 
 
 

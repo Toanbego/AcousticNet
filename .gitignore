@@ -21,7 +21,7 @@ $RECYCLE.BIN/
 # =========================
 # Operating System Files
 # =========================
-**.idea/
+**.idea
 **/workspace.*
 **Audio-Classification-master
 **youtube
