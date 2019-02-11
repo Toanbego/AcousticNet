@@ -7,20 +7,37 @@ This script reads CSV files and uses JSON to to navigate the data that exists on
 
 
 import pandas as pd
-import wave
+import argparse
+import ffmpeg
 
 from tqdm import tqdm
 import os
 import librosa
-import soundfile as sf
-from scipy import fftpack
 from scipy.io import wavfile
+import wave
+import soundfile as sf
 from python_speech_features import mfcc, logfbank
-
+import wave
 import numpy as np
 import csv
 from matplotlib import pyplot as plt
 import plotting_functions
+
+
+def parse_arguments():
+    """
+    Parse arguments
+    :return:
+    """
+    parser = argparse.ArgumentParser()
+    # Set up arguments
+
+    parser.add_argument('--plot', '-p', type=str,
+                        help='Either conv or time',
+                        default='False')
+
+    args = parser.parse_args()
+    return args
 
 def fetch_labels_youtube(file_path="../Datasets/balanced_train_segments.csv"):
     """
@@ -42,12 +59,19 @@ def add_length_to_column(df):
     """
     Goes through all the folds and add the length of each
     signal to the column
+
+    :param df: DataFrame
     :return:
     """
+    # Set column to index to loop through it faster
+    df.set_index('slice_file_name', inplace=True)
 
+    # Loop through audio files and check the length of the file
     for f, fold in tqdm(zip(df.index, df.fold)):
         signal, rate = sf.read(f'../Datasets/audio/fold{fold}/{f}')
         df.at[f, 'length'] = signal.shape[0] / rate
+
+    df.to_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_length.csv')
     return df
 
 
@@ -66,17 +90,16 @@ def calc_fft(y, rate):
     return magnitude, freq
 
 
-def separate_stereo_signal(signal):
+def separate_stereo_signal(y):
     """
     Takes a two-channel audio data and separates the audio into
-    :param signal:
+    :param y: The signal
     :return:
     """
-    left_channel = []
-    right_channel = []
-    for sample in signal:
-        left_channel.append(sample[0])
-        right_channel.append(sample[1])
+
+    channels = np.array(y).T
+    left_channel = channels[0]
+    right_channel = channels[1]
 
     return left_channel, right_channel
 
@@ -105,21 +128,86 @@ def envelope(y, rate, threshold):
     return mask
 
 
+def extract_features(signal, rate, clean=False ,fft=False, fbank=False, mffc=False):
+    """
+    Reads a signal and calculates the fft, filter bank and mfcc.
+    Always return the signal.
+    :param signal: Audio signal of time
+    :param rate: Sample rate of signal
+    :param clean: Removes low amplitudes from the signal
+    :param fft: Return the frequency and magnitude from the fast fourier transform
+    :param fbank: Return the log filter bank spectrogram
+    :param mffc: Return the Mel Frequency Cepstrum
+    :return:
+    """
+
+    list_of_returns = list()
+
+    list_of_returns.append(signal)
+
+    # Clean signal
+    if clean is True:
+        mask = envelope(signal, rate, threshold=0.0005)
+        list_of_returns.append(signal[mask])
+
+    # Calculate fourier transform
+    if fft is True:
+        fft = calc_fft(signal, rate)
+        list_of_returns.append(fft)
+    # Find filter bank coefficients
+    if fbank is True:
+        bank = logfbank(signal[:rate], rate, nfilt=26, nfft=1103).T
+        list_of_returns.append(bank)
+
+    # Find mel frequency
+    if mffc is True:
+        mel = mfcc(signal[:rate], rate, numcep=13, nfilt=26, nfft=1103).T
+        list_of_returns.append(mel)
+
+    return list_of_returns
+
+
+def plot_data(signals, fbank, mfccs):
+    """
+    Plots the data
+    :return:
+    """
+    # Plot class distribution
+    plotting_functions.plot_class_distribution(df, class_dist)
+
+    # Plot the time signal
+    plotting_functions.plot_signals(signals, channel='Stereo')
+    plt.show()
+
+    # Plot Fourier Transform
+    # plotting_functions.plot_fft(fft_left, channel='Stereo')
+    # plt.show()
+    # plotting_functions.plot_fft(fft_clean, channel='left_channel CLEAN')
+    # plt.show()
+    # plotting_functions.plot_fft(fft_right, channel='right_channel')
+    # plt.show()
+
+    # Plot the filter banks
+    plotting_functions.plot_fbank(fbank)
+    plt.show()
+
+    # Plot the Mel Cepstrum Coefficients
+    plotting_functions.plot_mfccs(mfccs)
+    plt.show()
+
+
 if __name__ == '__main__':
     """
     Main function
     :return:
     """
+    args = parse_arguments()
+    print(args.plot)
     # Create dataframe
-    df = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K.csv')
+    df = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_length.csv')
 
-    # Format data and add a 'length' column
-    # df.set_index('slice_file_name', inplace=True)
-    # df = add_length_to_column(df)
-    #
-    # # Create a class distribution
-    # class_dist = df.groupby(['label'])['length'].mean()
-    # plotting_functions.plot_class_distribution(df, class_dist)
+    # Create a class distribution
+    class_dist = df.groupby(['label'])['length'].mean()
 
     # Fetch the classes from the CSV file
     classes = list(np.unique(df.label))
@@ -143,61 +231,39 @@ if __name__ == '__main__':
         fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
 
         # Read signal and add it to dict. UrbanSound uses stereo, so there is two channels.
-        signal, sr = sf.read(f'../Datasets/audio/fold{fold}/{wav_file}')
-        # TODO Consider implementing pre-emphasis
+        signal, sr = sf.read(f'../Datasets/audio/original/fold{fold}/{wav_file}')
 
         # Separate the stereo audio
         left_channel, right_channel = separate_stereo_signal(signal)
-        df_signal = pd.DataFrame({'left_channel': left_channel, 'right_channel': right_channel})
 
-        # Create envelope for signal
-        mask = envelope(df_signal, sr, threshold=0.009)
-        signal_clean = np.array(left_channel)[mask]
+        signals[c], fft[c], fbank[c], mfccs[c] = extract_features(signal, sr,
+                                                                  fft=True,
+                                                                  fbank=True,
+                                                                  mffc=True)
 
-        signals[c] = signal
-        signals_left[c] = left_channel
-        signals_right[c] = right_channel
-        signals_clean[c] = signal_clean[0]
+    # If true, plot data
+    if args.plot == 'True':
+        plot_data(signals, fbank, mfccs)
 
-        # Find the fast-fourier-transform
-        fft[c] = calc_fft(signal, sr)
-        # fft_clean[c] = calc_fft(signals_clean, sr)
-        fft_left[c] = calc_fft(left_channel, sr)
-        fft_right[c] = calc_fft(right_channel, sr)
 
-        # Find filter bank coefficients
-        bank = logfbank(signal[:sr], sr, nfilt=26, nfft=1103).T
-        fbank[c] = bank
-
-        # Find mel frequency
-        mel = mfcc(signal[:sr], sr, numcep=13, nfilt=26, nfft=1103).T
-        mfccs[c] = mel
-
-    # Plot the time signal
-    plotting_functions.plot_signals(signals_left, channel='left_channel')
-    plt.show()
-    # plotting_functions.plot_signals(signals_right, channel='right_channel')
-    # plt.show()
-    # plotting_functions.plot_signals(signals_clean, channel='cleaned_left_channel')
-    # plt.show()
-    # plotting_functions.plot_signals(signals, channel='stereo')
-    # plt.show()
-
-    # Plot Fourier Transform
-    plotting_functions.plot_fft(fft_left, channel='left_channel')
-    plt.show()
-    # plotting_functions.plot_fft(fft_clean, channel='left_channel CLEAN')
-    # plt.show()
-    # plotting_functions.plot_fft(fft_right, channel='right_channel')
-    # plt.show()
-
-    # Plot the filter banks
-    plotting_functions.plot_fbank(fbank)
-    plt.show()
+    # Store in clean directory
     #
-    # # Plot the Mel Cepstrum Coefficients
-    plotting_functions.plot_mfccs(mfccs)
-    plt.show()
+    # for wav_file in tqdm(df.slice_file_name):
+    #     # Reads a down sampled signal
+    #     fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
+    #
+    #     # Check if there are files in clean folder from before
+    #     if len(os.listdir('../Datasets/audio/fold{fold}')) != 0:
+    #         continue
+    #     else:
+    #         signal, sr = sf.read(f'../Datasets/audio/fold{fold}/{wav_file}')
+    #
+    #         # sr, signal = wave.wave(f'../Datasets/audio/fold{fold}/{wav_file}', sr=16000)
+    #
+    #         wavfile.write(filename=f'../Datasets/audio/fold{fold}/{wav_file}', rate=16000, data=signal)
+    #         # mask = envelope(signal, rate, threshold=0.0005)
+    #         # sf.write(file=f'../Datasets/audio/clean/fold{fold}/{wav_file}', data=signal, samplerate=sr)
+
 
 
 

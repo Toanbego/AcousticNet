@@ -43,7 +43,7 @@ def plot_signals(signals, channel='stereo'):
 	fig, axes = plt.subplots(nrows=2, ncols=5, sharex=False,
 							 sharey=True, figsize=(20, 5))
 
-	# fig.suptitle(f'Time Series - {channel}', size=16)
+	fig.suptitle(f'Time Series - {channel}', size=16)
 
 	i = 0
 	for x in range(2):
@@ -89,10 +89,12 @@ def plot_fbank(fbank):
 	fig, axes = plt.subplots(nrows=2, ncols=5, sharex=False,
 							 sharey=True, figsize=(20, 5))
 	fig.suptitle('Filter Bank Coefficients', size=16)
+
 	i = 0
 	for x in range(2):
 		for y in range(5):
 			axes[x, y].set_title(list(fbank.keys())[i])
+
 			axes[x, y].imshow(list(fbank.values())[i], cmap='hot', interpolation='nearest')
 			axes[x, y].get_xaxis().set_visible(False)
 			axes[x, y].get_yaxis().set_visible(False)
@@ -131,5 +133,5 @@ def plot_class_distribution(df, class_dist):
 	ax.pie(class_dist, labels=class_dist.index, shadow=False, autopct='%1.1f%%', startangle=90)
 	ax.axis('equal')
 	plt.show()
-	df.reset_index(inplace=True)
+	# df.reset_index(inplace=True)
 
