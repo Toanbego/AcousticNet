@@ -53,7 +53,7 @@ def plot_signals(signals, channel='stereo'):
 			axes[x, y].get_xaxis().set_visible(False)
 			axes[x, y].get_yaxis().set_visible(False)
 			i += 1
-	# fig.tight_layout(pad=0.4, w_pad=0.5, h_pad=1.0)
+
 
 
 def plot_fft(fft, channel='stereo'):
@@ -64,17 +64,14 @@ def plot_fft(fft, channel='stereo'):
 	"""
 	fig, axes = plt.subplots(nrows=2, ncols=5, sharex=False,
 							 sharey=True, figsize=(20, 5))
-
-	fig.suptitle(f'Fourier Transforms - {channel}', size=16)
-
+	fig.suptitle('Fourier Transforms CLEAN', size=16)
 	i = 0
 	for x in range(2):
 		for y in range(5):
-
 			data = list(fft.values())[i]
-			amplitude, freq = data[0], data[1]
+			Y, freq = data[0], data[1]
 			axes[x, y].set_title(list(fft.keys())[i])
-			axes[x, y].plot(freq, amplitude)
+			axes[x, y].plot(freq, Y)
 			axes[x, y].get_xaxis().set_visible(False)
 			axes[x, y].get_yaxis().set_visible(False)
 			i += 1
@@ -87,7 +84,7 @@ def plot_fbank(fbank):
 	:return:
 	"""
 	fig, axes = plt.subplots(nrows=2, ncols=5, sharex=False,
-							 sharey=True, figsize=(20, 5))
+							sharey=True, figsize=(20, 5))
 	fig.suptitle('Filter Bank Coefficients', size=16)
 
 	i = 0

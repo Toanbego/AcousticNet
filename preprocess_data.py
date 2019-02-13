@@ -128,7 +128,7 @@ def envelope(y, rate, threshold):
     return mask
 
 
-def extract_features(signal, rate, clean=False ,fft=False, fbank=False, mffc=False):
+def extract_features(signal, rate, clean=False ,fft=False, fbank=False, mffc=False, config=None):
     """
     Reads a signal and calculates the fft, filter bank and mfcc.
     Always return the signal.
@@ -167,7 +167,7 @@ def extract_features(signal, rate, clean=False ,fft=False, fbank=False, mffc=Fal
     return list_of_returns
 
 
-def plot_data(signals, fbank, mfccs):
+def plot_data(signals=None, fbank=None, mfccs=None, fft=None):
     """
     Plots the data
     :return:
@@ -176,24 +176,24 @@ def plot_data(signals, fbank, mfccs):
     plotting_functions.plot_class_distribution(df, class_dist)
 
     # Plot the time signal
-    plotting_functions.plot_signals(signals, channel='Stereo')
-    plt.show()
+    if signals is not None:
+        plotting_functions.plot_signals(signals, channel='Stereo')
+        plt.show()
 
     # Plot Fourier Transform
-    # plotting_functions.plot_fft(fft_left, channel='Stereo')
-    # plt.show()
-    # plotting_functions.plot_fft(fft_clean, channel='left_channel CLEAN')
-    # plt.show()
-    # plotting_functions.plot_fft(fft_right, channel='right_channel')
-    # plt.show()
+    if fft is not None:
+        plotting_functions.plot_fft(fft, channel='Stereo')
+        plt.show()
 
     # Plot the filter banks
-    plotting_functions.plot_fbank(fbank)
-    plt.show()
+    if fbank is not None:
+        plotting_functions.plot_fbank(fbank)
+        plt.show()
 
     # Plot the Mel Cepstrum Coefficients
-    plotting_functions.plot_mfccs(mfccs)
-    plt.show()
+    if mfccs is not None:
+        plotting_functions.plot_mfccs(mfccs)
+        plt.show()
 
 
 if __name__ == '__main__':
@@ -202,7 +202,7 @@ if __name__ == '__main__':
     :return:
     """
     args = parse_arguments()
-    print(args.plot)
+
     # Create dataframe
     df = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_length.csv')
 
@@ -231,7 +231,7 @@ if __name__ == '__main__':
         fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
 
         # Read signal and add it to dict. UrbanSound uses stereo, so there is two channels.
-        signal, sr = sf.read(f'../Datasets/audio/original/fold{fold}/{wav_file}')
+        signal, sr = sf.read(f'../Datasets/audio/downsampled/fold{fold}/{wav_file}')
 
         # Separate the stereo audio
         left_channel, right_channel = separate_stereo_signal(signal)
@@ -243,11 +243,9 @@ if __name__ == '__main__':
 
     # If true, plot data
     if args.plot == 'True':
-        plot_data(signals, fbank, mfccs)
-
+        plot_data(signals, fbank, mfccs, fft=None)
 
     # Store in clean directory
-    #
     # for wav_file in tqdm(df.slice_file_name):
     #     # Reads a down sampled signal
     #     fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]

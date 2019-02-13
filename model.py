@@ -10,7 +10,8 @@ from keras.models import Sequential
 from keras.utils import to_categorical
 from sklearn.utils.class_weight import compute_class_weight
 from tqdm import tqdm
-from python_speech_features import mfcc
+from python_speech_features import mfcc, fbank, logfbank
+import python_speech_features
 import soundfile as sf
 import preprocess_data
 
@@ -33,7 +34,7 @@ def parse_arguments():
     return args
 
 
-def build_feature_from_signal(file_path, config, feature_to_extract):
+def build_feature_from_signal(file_path, config, feature_to_extract='mfcc'):
     """
     Reads the signal from the file path. Then build mffc features that is returned.
     If the signal is stereo, the signal will be split up and only the first channel is used.
@@ -54,11 +55,17 @@ def build_feature_from_signal(file_path, config, feature_to_extract):
     sample = wav[rand_index:rand_index + config.step]
 
     # Extracts the mel frequency cepstrum coefficients
-    # if feature_to_extract == 'mfcc':
-    #     x_sample = mfcc(sample, rate,
-    #                     numcep=config.nfeat,
-    #                     nfilt=config.nfilt,
-    #                     nfft=config.nfft).T
+    if feature_to_extract == 'mfcc':
+        sample = mfcc(sample, rate,
+                        numcep=config.nfeat,
+                        nfilt=config.nfilt,
+                        nfft=config.nfft).T
+
+    elif feature_to_extract == 'logfbank':
+        sample = logfbank(sample, rate,
+                        # numcep=config.nfeat,
+                        nfilt=config.nfilt,
+                        nfft=config.nfft).T
 
     return sample
 
@@ -78,7 +85,8 @@ def build_features_for_training(config, df, n_samples, classes, class_dist, prob
     y = []
     _min, _max = float('inf'), -float('inf')
     df.set_index('slice_file_name', inplace=True)
-
+    feature = 'mfcc'
+    print(f"Features used are {feature}")
     # Build feature samples
     for _ in tqdm(range(n_samples)):
 
@@ -91,7 +99,7 @@ def build_features_for_training(config, df, n_samples, classes, class_dist, prob
         file_path = f'../Datasets/audio/downsampled/fold{fold}/{file}'
 
         # Get the mffc feature
-        x_sample = build_feature_from_signal(file_path, config, mfcc)
+        x_sample = build_feature_from_signal(file_path, config, feature_to_extract=feature)
 
         # Update min and max
         _min = min(np.amin(x_sample), _min)
@@ -201,14 +209,15 @@ def main():
 
     # Is set to 1000 for testing purposes
     # n_samples = 2 * int(df['length'].sum()/0.1)
-    n_samples = 10000
+    n_samples = 300
+
     prob_dist = class_dist / class_dist.sum()
 
     # Set up the config class
     config = Config(mode=args.mode)
 
     if config.mode == 'conv':
-
+        # Goes through the folder with the data and randomly extracts data samples from the audio files
         x, y = build_features_for_training(config, df, n_samples, classes, class_dist, prob_dist)
         # Reshape one-hot encode matrix back to string labels
         y_flat = np.argmax(y, axis=1)
