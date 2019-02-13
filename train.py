@@ -44,8 +44,6 @@ class ClassifyAudio:
         """
         Initialize variables
         """
-
-        config['simulation'].getboolean('train')
         # DataFrame
         self.df = df
 
@@ -56,8 +54,8 @@ class ClassifyAudio:
 
         # Audio parameters
         self.mode = config['model']['net']
-        self.save_features = config['preprocessing']['save_features']
-        self.load_features = config['preprocessing']['load_features']
+        self.save_features = config['preprocessing'].getboolean('save_features')
+        self.load_features = config['preprocessing'].getboolean('load_features')
         self.feature = config['preprocessing']['feature']
         self.n_filt = config['preprocessing'].getint('n_filt')
         self.n_feat = config['preprocessing'].getint('n_feat')
@@ -107,7 +105,7 @@ class ClassifyAudio:
         model.add(Dense(10, activation='softmax'))
         model.summary()
         model.compile(loss='categorical_crossentropy',
-                      optimizer='self.optimizer',
+                      optimizer=self.optimizer,
                       metrics=['acc'])
 
         return model
@@ -172,10 +170,13 @@ class ClassifyAudio:
         always try more or less.
         :return:
         """
+        # No need to extract features if you are already loading saved features
+        if self.load_features is True:
+            return None, None
+
         x = []
         y = []
         _min, _max = float('inf'), -float('inf')
-        # self.df.set_index('slice_file_name', inplace=True)
 
         print(f"Features used are {self.feature}")
 
@@ -183,13 +184,17 @@ class ClassifyAudio:
         folds = list(np.unique(self.df['fold']))
 
         # Build feature samples
-        for fold in folds:
+        for idx,  fold in enumerate(folds):
             print(f'\nExtracting data from fold{fold}')
+
             # Get the filenames that exists in that fold
-            files_in_fold = self.df.loc[self.df.fold == fold].slice_file_name
+            files_in_fold = self.df.loc[self.df.fold == fold]
+
+            # Get the number of samples to create for each fold
+            samples_per_fold = 2 * int(files_in_fold['length'].sum() / 0.1)
 
             # Loop through the files in the fold
-            for file in tqdm(files_in_fold):
+            for file in tqdm(files_in_fold.slice_file_name):
                 # TODO: Create n_samples from fold. Create them by randomly choosing
                 #       index and going step_length from there.
 
@@ -201,8 +206,11 @@ class ClassifyAudio:
 
                 # Get the mffc feature
                 x_sample = self.build_feature_from_signal(file_path, feature_to_extract=self.feature)
+
+                # If the flag is set, it means it could not process current file and it moves to next.
                 if x_sample == 'move to next file':
                     continue
+
                 # Update min and max
                 _min = min(np.amin(x_sample), _min)
                 _max = max(np.amax(x_sample), _max)
@@ -225,6 +233,10 @@ class ClassifyAudio:
         y_flat = np.argmax(y, axis=1)  # Reshape one-hot encode matrix back to string labels
         self.class_weight = compute_class_weight('balanced', np.unique(y_flat), y_flat)
 
+        # Save features if save_feature is set to True
+        if self.save_features is True:
+            np.savez('usounds_features/test', x=x, y=y)
+
         return x, y
 
     def create_training_data_shuffle(self):
@@ -238,6 +250,10 @@ class ClassifyAudio:
         always try more or less.
         :return:
         """
+        # No need to extract features if you are already loading saved features
+        if self.load_features is True:
+            return None, None
+
         x = []
         y = []
         _min, _max = float('inf'), -float('inf')
@@ -281,9 +297,8 @@ class ClassifyAudio:
         y_flat = np.argmax(y, axis=1)  # Reshape one-hot encode matrix back to string labels
         self.class_weight = compute_class_weight('balanced', np.unique(y_flat), y_flat)
 
-        if self.save_features:
-            np.savez('')
-
+        if self.save_features is True:
+            np.savez('usounds_features/test', x, y)
 
         return x, y
 
@@ -307,6 +322,7 @@ class ClassifyAudio:
                        class_weight=self.class_weight,
                        # validation_data=(train_x, train_y)
                        )
+
 
 def main():
     """
@@ -335,11 +351,16 @@ def main():
     # Load and preprocess training data
     x_train, y_train = audio_model.create_training_data_shuffle()
 
-    # Compile model
-    audio_model.set_up_model(x_train)
+    if audio_model.load_features is True:
+        features = np.load('usounds_features/test.npz')
+        z = features
 
-    # Train network
-    audio_model.train(x_train, y_train)
+
+    # # Compile model
+    # audio_model.set_up_model(x_train)
+    #
+    # # Train network
+    # audio_model.train(x_train, y_train)
 
     # TODO: The folds are shuffled together. They should be trained on separately.
     #       Perhaps one fold should be one batch.

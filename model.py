@@ -208,7 +208,7 @@ def main():
     class_dist = df.groupby(['label'])['length'].mean()
 
     # Is set to 1000 for testing purposes
-    # n_samples = 2 * int(df['length'].sum()/0.1)
+    n_samples = 2 * int(df['length'].sum()/0.1)
     n_samples = 300
 
     prob_dist = class_dist / class_dist.sum()
