@@ -21,6 +21,7 @@ import wave
 import numpy as np
 import csv
 from matplotlib import pyplot as plt
+from matplotlib import axes as ax
 import plotting_functions
 
 
@@ -116,8 +117,8 @@ def envelope(y, rate, threshold):
     mask = []
 
     # Checks one column of the signal dataframe
-    y = pd.Series(y[y.columns[0]]).apply(np.abs)
-    y_mean = y.rolling(window=int(rate/10), min_periods=1, center=True).mean()
+    y = pd.Series(y).apply(np.abs)
+    y_mean = y.rolling(window=int(rate / 10), min_periods=1, center=True).mean()
 
     for mean in y_mean:
         if mean > threshold:
@@ -173,7 +174,7 @@ def plot_data(signals=None, fbank=None, mfccs=None, fft=None):
     :return:
     """
     # Plot class distribution
-    plotting_functions.plot_class_distribution(df, class_dist)
+    plotting_functions.plot_class_distribution(class_dist)
 
     # Plot the time signal
     if signals is not None:
@@ -225,25 +226,55 @@ if __name__ == '__main__':
     fft_right = {}
 
     # Loop through folds and calculate spectrogram and plot data
-    for c in classes:
-        # Get the file name and the fold it exists in from the dataframe
-        wav_file = df[df.label == c].iloc[0, 0]
-        fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
+    c = 'dog_bark'
+    # for c in classes:
+    # Get the file name and the fold it exists in from the dataframe
+    wav_file = df[df.label == c].iloc[0, 0]
+    fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
 
-        # Read signal and add it to dict. UrbanSound uses stereo, so there is two channels.
-        signal, sr = sf.read(f'../Datasets/audio/downsampled/fold{fold}/{wav_file}')
+    # Read signal and add it to dict. UrbanSound uses stereo, so there is two channels.
+    signal, sr = sf.read(f'../Datasets/audio/downsampled/fold{fold}/{wav_file}')
 
-        # Separate the stereo audio
-        left_channel, right_channel = separate_stereo_signal(signal)
+    # Separate the stereo audio
+    left_channel, right_channel = separate_stereo_signal(signal)
 
-        signals[c], fft[c], fbank[c], mfccs[c] = extract_features(signal, sr,
-                                                                  fft=True,
-                                                                  fbank=True,
-                                                                  mffc=True)
+    mask = envelope(right_channel, sr, threshold=0.008)
+
+    signals[c], fft[c], fbank[c], mfccs[c] = extract_features(right_channel[mask], sr,
+                                                              fft=True,
+                                                              fbank=True,
+                                                              mffc=True)
+
+    signals_right[c], fft_right[c], fbank[c], mfccs[c] = extract_features(right_channel, sr,
+                                                              fft=True,
+                                                              fbank=True,
+                                                              mffc=True)
+
+    plt.title('Dog bark')
+
+
+    plt.plot(signals_right[c], 'b')
+    plt.plot(signals[c], 'r')
+    plt.legend(('Before thresholding', 'After thresholding'))
+    plt.show()
+
+    plt.title(c)
+    plt.ylim((0, 0.017))
+    plt.xlim(-400, 3000)
+    plot1 = plt.plot(fft[c][1], fft[c][0], 'r-',
+                     # alpha=0.7
+                     )
+    plot2 = plt.plot(fft_right[c][1], fft_right[c][0], 'b')
+
+    plt.legend(('After thresholding', 'Before thresholding'))
+    # plt.legend(['Before thresholding'])
+    plt.show()
+
+
 
     # If true, plot data
-    if args.plot == 'True':
-        plot_data(signals, fbank, mfccs, fft=None)
+    # if args.plot == 'True':
+    #     plot_data(signals, fbank, mfccs, fft)
 
     # Store in clean directory
     # for wav_file in tqdm(df.slice_file_name):

@@ -36,7 +36,7 @@ def parse_arguments():
     return args
 
 
-class ClassifyAudio:
+class TrainAudioClassificator:
     """
     Class object for training a model to classify acoustic sounds
     """
@@ -69,9 +69,12 @@ class ClassifyAudio:
         self.optimizer = config['model']['optimizer']
 
         # Parameters to be initiated at a later stage
-        self.class_weight = None
+        self.class_weight = None                #
         self.input_shape = None
         self.model = None
+        self.features = None
+        self.x = None
+        self.y = None
 
     def set_up_model(self, train_x):
         """
@@ -173,9 +176,8 @@ class ClassifyAudio:
         # No need to extract features if you are already loading saved features
         if self.load_features is True:
             return None, None
-
-        x = []
-        y = []
+        fold_list_x = []
+        fold_list_y = []
         _min, _max = float('inf'), -float('inf')
 
         print(f"Features used are {self.feature}")
@@ -185,6 +187,9 @@ class ClassifyAudio:
 
         # Build feature samples
         for idx,  fold in enumerate(folds):
+
+            x = []
+            y = []
             print(f'\nExtracting data from fold{fold}')
 
             # Get the filenames that exists in that fold
@@ -194,12 +199,11 @@ class ClassifyAudio:
             samples_per_fold = 2 * int(files_in_fold['length'].sum() / 0.1)
 
             # Loop through the files in the fold
-            for file in tqdm(files_in_fold.slice_file_name):
-                # TODO: Create n_samples from fold. Create them by randomly choosing
-                #       index and going step_length from there.
+            for _ in tqdm(range(samples_per_fold)):
 
-                # Get the label from the column by using the file name
-                label = self.df.loc[self.df['slice_file_name'] == file, 'label'].iloc[0]
+                # Pick a random class from the probability distribution and then a random file with that class
+                rand_class = np.random.choice(self.class_dist.index, p=self.prob_dist)
+                file = np.random.choice(files_in_fold[self.df.label == rand_class].slice_file_name)
 
                 # Set file path
                 file_path = f'../Datasets/audio/downsampled/fold{fold}/{file}'
@@ -215,29 +219,41 @@ class ClassifyAudio:
                 _min = min(np.amin(x_sample), _min)
                 _max = max(np.amax(x_sample), _max)
                 x.append(x_sample if self.mode == 'conv' else x_sample.T)
-                y.append(self.classes.index(label))
+                y.append(self.classes.index(rand_class))
 
-        # Normalize X and y
-        y = np.array(y)
-        x = np.array(x)
-        x = (x - _min) / (_max - _min)
+            # Normalize X and y
+            y = np.array(y)
+            x = np.array(x)
+            x = (x - _min) / (_max - _min)
 
-        # Reshape X based on 'conv' mode or 'time' mode
-        if self.mode == 'cnn':
-            x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 1)
+            # Reshape X based on 'conv' mode or 'time' mode
+            if self.mode == 'cnn':
+                x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 1)
 
-        # One-hot encode the labels
-        y = to_categorical(y, num_classes=10)
+            # One-hot encode the labels
+            y = to_categorical(y, num_classes=10)
 
-        # Computes the class weight for the samples extracted
-        y_flat = np.argmax(y, axis=1)  # Reshape one-hot encode matrix back to string labels
-        self.class_weight = compute_class_weight('balanced', np.unique(y_flat), y_flat)
+            fold_list_x.append(x)
+            fold_list_y.append(y)
 
+        # # Computes the class weight for the samples extracted
+
+        y = np.array(fold_list_y)
+        x = np.array(fold_list_x)
         # Save features if save_feature is set to True
         if self.save_features is True:
             np.savez('usounds_features/test', x=x, y=y)
 
         return x, y
+
+    def compute_class_weight(self, y_train):
+        """
+        Computes the class_weight distribution
+        :return:
+        """
+
+        y_flat = np.argmax(y_train, axis=1)  # Reshape one-hot encode matrix back to string labels
+        self.class_weight = compute_class_weight('balanced', np.unique(y_flat), y_flat)
 
     def create_training_data_shuffle(self):
         """
@@ -302,26 +318,66 @@ class ClassifyAudio:
 
         return x, y
 
-    def train(self, train_x, train_y):
+    def train(self, x_train, y_train, x_test, y_test):
         """
         Method used for training a model.
+
+        :param x_train:
+        :param y_train:
+        :param x_test:
+        :param y_test:
         :return:
         """
         # Train the network
-        # self.model.fit(train_x[:-838], train_y[:-838],
-        #                epochs=self.epochs,
-        #                batch_size=32,
-        #                shuffle=False,
-        #                class_weight=self.class_weight,
-        #                validation_data=(train_x[-838:], train_y[-838:]))
-
-        self.model.fit(train_x, train_y,
+        self.model.fit(x_train, y_train,
                        epochs=self.epochs,
                        batch_size=32,
                        shuffle=True,
                        class_weight=self.class_weight,
-                       # validation_data=(train_x, train_y)
+                       validation_data=(x_test, y_test)
                        )
+
+    def separate_loaded_data(self, nr_rolls=0):
+        """
+        When the UrbanSounds data is loaded, it will be loaded as a tuple of size 10.
+        Each tuple contains the array with all the features extracted from that fold.
+        This function concatenates the tuple into one large array.
+        :param nr_rolls: The number of rolls for the folds. 5 rolls will set fold nr 5 as validation. 2 will set fold 8.
+        :return: x_train, y_train, x_test, y_test
+        """
+        # TODO: The function always returns the last 10% as test. Should be able to put in argument that
+        #       allows to choose other folds.
+
+
+        # If nr_rolls is specified, rotate the data set
+        x = x[nr_rolls:] + x[:nr_rolls]
+        y = y[nr_rolls:] + y[:nr_rolls]
+
+        # Concatenate the array
+        x_train = np.concatenate(x[:-1], axis=0)
+        y_train = np.concatenate(y[:-1], axis=0)
+        x_test = x[-1]
+        y_test = y[-1]
+
+        return x_train, y_train, x_test, y_test
+
+    def rotate(self, list, rotations=1):
+        """
+        Rotates the group of data
+        :param list: Data groups
+        :param rotations: Number of rotations
+        :return:
+        """
+
+
+    def extract_features(self, filepath):
+        """
+        Load features from .npz file and creates an attribute with the tuple of features
+        :param filepath:
+        :return:
+        """
+        self.features = np.load(filepath)
+        self.x, self.y = self.features['x'], self.features['y']
 
 
 def main():
@@ -342,25 +398,25 @@ def main():
         6. When this pipeline is finished, work with the experimentation!
 
     """
-    # Read csv for urbanSounds
+    # Read csv for UrbanSounds
     df = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_length.csv')
 
     # Initialize class
-    audio_model = ClassifyAudio(df)
+    audio_model = TrainAudioClassificator(df)
 
     # Load and preprocess training data
-    x_train, y_train = audio_model.create_training_data_shuffle()
+    x_train, y_train = audio_model.preprocess_dataset()
 
     if audio_model.load_features is True:
-        features = np.load('usounds_features/test.npz')
-        z = features
+        audio_model.extract_features('usounds_features/test.npz')
+        x_train, y_train, x_test, y_test = audio_model.separate_loaded_data()
 
+    # Compile model
+    audio_model.set_up_model(x_train)
+    audio_model.compute_class_weight(y_train)
 
-    # # Compile model
-    # audio_model.set_up_model(x_train)
-    #
-    # # Train network
-    # audio_model.train(x_train, y_train)
+    # Train network
+    audio_model.train(x_train, y_train, x_test, y_test)
 
     # TODO: The folds are shuffled together. They should be trained on separately.
     #       Perhaps one fold should be one batch.

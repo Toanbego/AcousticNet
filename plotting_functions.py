@@ -48,12 +48,11 @@ def plot_signals(signals, channel='stereo'):
 	i = 0
 	for x in range(2):
 		for y in range(5):
-			axes[x, y].set_title(list(signals.keys())[i], fontsize=20)
+			axes[x, y].set_title(list(signals.keys())[i], fontsize=30)
 			axes[x, y].plot(list(signals.values())[i])
 			axes[x, y].get_xaxis().set_visible(False)
 			axes[x, y].get_yaxis().set_visible(False)
 			i += 1
-
 
 
 def plot_fft(fft, channel='stereo'):
@@ -72,8 +71,8 @@ def plot_fft(fft, channel='stereo'):
 			Y, freq = data[0], data[1]
 			axes[x, y].set_title(list(fft.keys())[i])
 			axes[x, y].plot(freq, Y)
-			axes[x, y].get_xaxis().set_visible(False)
-			axes[x, y].get_yaxis().set_visible(False)
+			axes[x, y].get_xaxis().set_visible(True)
+			axes[x, y].get_yaxis().set_visible(True)
 			i += 1
 
 
@@ -117,7 +116,7 @@ def plot_mfccs(mfccs):
 			i += 1
 
 
-def plot_class_distribution(df, class_dist):
+def plot_class_distribution(class_dist):
 	"""
 	Plots a cake diagram of the distribution of the various classes
 	of the UrbanSound dataset

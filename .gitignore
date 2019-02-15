@@ -21,5 +21,7 @@ $RECYCLE.BIN/
 # =========================
 # Operating System Files
 # =========================
-**/.idea
+**.idea
 **__pycache__
+**weights/
+**usounds_features/
