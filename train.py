@@ -8,6 +8,7 @@ from keras.layers import Conv2D, MaxPool2D, Flatten
 from keras.layers import Dropout, Dense
 from keras.models import Sequential
 from keras.utils import to_categorical
+from keras.callbacks import ModelCheckpoint, Callback, TensorBoard
 from sklearn.utils.class_weight import compute_class_weight
 from tqdm import tqdm
 from python_speech_features import mfcc, fbank, logfbank
@@ -56,17 +57,21 @@ class TrainAudioClassificator:
         self.mode = config['model']['net']
         self.save_features = config['preprocessing'].getboolean('save_features')
         self.load_features = config['preprocessing'].getboolean('load_features')
+        self.load_file = config['preprocessing']['load_file']
         self.feature = config['preprocessing']['feature']
         self.n_filt = config['preprocessing'].getint('n_filt')
         self.n_feat = config['preprocessing'].getint('n_feat')
         self.n_fft = config['preprocessing'].getint('n_fft')
         self.rate = config['preprocessing'].getint('rate')
         self.step = int(self.rate / 10)
+        self.activate_threshold = config['preprocessing'].getboolean('activate_threshold')
+        self.threshold = config['preprocessing'].getfloat('threshold')
 
         # Training parameters
         self.n_samples = config['model'].getint('n_samples')
         self.epochs = config['model'].getint('epochs')
         self.optimizer = config['model']['optimizer']
+        self.batch_size = config['model'].getint('batch_size')
 
         # Parameters to be initiated at a later stage
         self.class_weight = None                #
@@ -75,6 +80,7 @@ class TrainAudioClassificator:
         self.features = None
         self.x = None
         self.y = None
+        self.callbacks_list = None
 
     def set_up_model(self, train_x):
         """
@@ -96,24 +102,43 @@ class TrainAudioClassificator:
                          padding='same', input_shape=self.input_shape))
         model.add(Conv2D(32, (3, 3), activation='relu', strides=(1, 1),
                          padding='same', ))
+        model.add(Dropout(0.3))
+        model.add(MaxPool2D((2, 2)))
+        model.add(Conv2D(64, (3, 3), activation='relu', strides=(1, 1),
+                         padding='same', ))
         model.add(Conv2D(64, (3, 3), activation='relu', strides=(1, 1),
                          padding='same', ))
         model.add(Conv2D(128, (3, 3), activation='relu', strides=(1, 1),
                          padding='same', ))
+
         model.add(MaxPool2D((2, 2)))
-        model.add(Dropout(0.5))
+        model.add(Dropout(0.3))
         model.add(Flatten())
         model.add(Dense(128, activation='relu'))
         model.add(Dense(64, activation='relu'))
+
         model.add(Dense(10, activation='softmax'))
         model.summary()
         model.compile(loss='categorical_crossentropy',
                       optimizer=self.optimizer,
-                      metrics=['acc'])
+                      metrics=['accuracy'])
 
+        tb_callbacks = TensorBoard(log_dir='./logs', histogram_freq=0, batch_size=self.batch_size, write_graph=True,
+                                   write_grads=True, write_images=False, embeddings_freq=0,
+                                   embeddings_layer_names=None, embeddings_metadata=None, embeddings_data=None,
+                                   update_freq=100000)
+
+        checkpoint = ModelCheckpoint('weights/weights.{epoch:02d}-{val_acc:.2f}.hdf5',
+                                     monitor='val_acc',
+                                     verbose=1,
+                                     save_best_only=True,
+                                     save_weights_only=False,
+                                     mode='auto',
+                                     period=1)
+        self.callbacks_list = [checkpoint, tb_callbacks]
         return model
 
-    def build_feature_from_signal(self, file_path, feature_to_extract='mfcc'):
+    def build_feature_from_signal(self, file_path, feature_to_extract='mfcc', activate_threshold=False):
         """
         Reads the signal from the file path. Then build mffc features that is returned.
         If the signal is stereo, the signal will be split up and only the first channel is used.
@@ -132,12 +157,18 @@ class TrainAudioClassificator:
         if len(sample.shape) > 1:
             sample, signal_2 = preprocess_data.separate_stereo_signal(sample)
 
+        # Skip file if the audio is to small
         try:
             rand_index = np.random.randint(0, sample.shape[0] - self.step)
             sample = sample[rand_index:rand_index + self.step]
         except ValueError:
             print("audio file to small. Skip and move to next")
             return 'move to next file'
+
+        # Perform filtering with a threshold on the time signal
+        if activate_threshold is True:
+            mask = preprocess_data.envelope(sample, rate, self.threshold)
+            sample = sample[mask]
 
         # Extracts the mel frequency cepstrum coefficients
         if feature_to_extract == 'mfcc':
@@ -208,8 +239,10 @@ class TrainAudioClassificator:
                 # Set file path
                 file_path = f'../Datasets/audio/downsampled/fold{fold}/{file}'
 
-                # Get the mffc feature
-                x_sample = self.build_feature_from_signal(file_path, feature_to_extract=self.feature)
+                # Extract feature from signal
+                x_sample = self.build_feature_from_signal(file_path,
+                                                          feature_to_extract=self.feature,
+                                                          activate_threshold=self.activate_threshold)
 
                 # If the flag is set, it means it could not process current file and it moves to next.
                 if x_sample == 'move to next file':
@@ -242,7 +275,7 @@ class TrainAudioClassificator:
         x = np.array(fold_list_x)
         # Save features if save_feature is set to True
         if self.save_features is True:
-            np.savez('usounds_features/test', x=x, y=y)
+            np.savez('usounds_features/filter_0.005_all', x=x, y=y)
 
         return x, y
 
@@ -331,8 +364,9 @@ class TrainAudioClassificator:
         # Train the network
         self.model.fit(x_train, y_train,
                        epochs=self.epochs,
-                       batch_size=32,
+                       batch_size=self.batch_size,
                        shuffle=True,
+                       callbacks=self.callbacks_list,
                        class_weight=self.class_weight,
                        validation_data=(x_test, y_test)
                        )
@@ -348,27 +382,17 @@ class TrainAudioClassificator:
         # TODO: The function always returns the last 10% as test. Should be able to put in argument that
         #       allows to choose other folds.
 
-
         # If nr_rolls is specified, rotate the data set
-        x = x[nr_rolls:] + x[:nr_rolls]
-        y = y[nr_rolls:] + y[:nr_rolls]
+        # self.x = self.x[nr_rolls:] + self.x[:nr_rolls]
+        # self.y = self.y[nr_rolls:] + self.y[:nr_rolls]
 
         # Concatenate the array
-        x_train = np.concatenate(x[:-1], axis=0)
-        y_train = np.concatenate(y[:-1], axis=0)
-        x_test = x[-1]
-        y_test = y[-1]
+        x_train = np.concatenate(self.x[:-1], axis=0)
+        y_train = np.concatenate(self.y[:-1], axis=0)
+        x_test = self.x[-1]
+        y_test = self.y[-1]
 
         return x_train, y_train, x_test, y_test
-
-    def rotate(self, list, rotations=1):
-        """
-        Rotates the group of data
-        :param list: Data groups
-        :param rotations: Number of rotations
-        :return:
-        """
-
 
     def extract_features(self, filepath):
         """
@@ -376,8 +400,33 @@ class TrainAudioClassificator:
         :param filepath:
         :return:
         """
+        # Load and fetch features
         self.features = np.load(filepath)
         self.x, self.y = self.features['x'], self.features['y']
+
+
+def run(audio_model):
+    """
+    Set up model and start training
+    :param audio_model:
+    :return:
+    """
+
+    # Load and preprocess training data
+    x_train, y_train = audio_model.preprocess_dataset()
+
+    if audio_model.load_features is True:
+        audio_model.extract_features(audio_model.load_file)
+        x_train, y_train, x_test, y_test = audio_model.separate_loaded_data()
+
+    # Compile model
+    audio_model.set_up_model(x_train)
+
+    # Compute class weight
+    audio_model.compute_class_weight(y_train)
+
+    # Train network
+    audio_model.train(x_train, y_train, x_test, y_test)
 
 
 def main():
@@ -404,19 +453,9 @@ def main():
     # Initialize class
     audio_model = TrainAudioClassificator(df)
 
-    # Load and preprocess training data
-    x_train, y_train = audio_model.preprocess_dataset()
+    # Start training or predicting
+    run(audio_model)
 
-    if audio_model.load_features is True:
-        audio_model.extract_features('usounds_features/test.npz')
-        x_train, y_train, x_test, y_test = audio_model.separate_loaded_data()
-
-    # Compile model
-    audio_model.set_up_model(x_train)
-    audio_model.compute_class_weight(y_train)
-
-    # Train network
-    audio_model.train(x_train, y_train, x_test, y_test)
 
     # TODO: The folds are shuffled together. They should be trained on separately.
     #       Perhaps one fold should be one batch.

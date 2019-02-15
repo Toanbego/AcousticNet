@@ -97,7 +97,6 @@ def separate_stereo_signal(y):
     :param y: The signal
     :return:
     """
-
     channels = np.array(y).T
     left_channel = channels[0]
     right_channel = channels[1]
@@ -226,7 +225,7 @@ if __name__ == '__main__':
     fft_right = {}
 
     # Loop through folds and calculate spectrogram and plot data
-    c = 'dog_bark'
+    c = 'children_playing'
     # for c in classes:
     # Get the file name and the fold it exists in from the dataframe
     wav_file = df[df.label == c].iloc[0, 0]
@@ -238,7 +237,7 @@ if __name__ == '__main__':
     # Separate the stereo audio
     left_channel, right_channel = separate_stereo_signal(signal)
 
-    mask = envelope(right_channel, sr, threshold=0.008)
+    mask = envelope(right_channel, sr, threshold=0.005)
 
     signals[c], fft[c], fbank[c], mfccs[c] = extract_features(right_channel[mask], sr,
                                                               fft=True,
@@ -250,17 +249,17 @@ if __name__ == '__main__':
                                                               fbank=True,
                                                               mffc=True)
 
-    plt.title('Dog bark')
-
+    # Plot
+    plt.title('Children playing')
 
     plt.plot(signals_right[c], 'b')
     plt.plot(signals[c], 'r')
     plt.legend(('Before thresholding', 'After thresholding'))
     plt.show()
 
-    plt.title(c)
-    plt.ylim((0, 0.017))
-    plt.xlim(-400, 3000)
+    plt.title('Children playing')
+    plt.ylim((0, 0.00150))
+    plt.xlim(-200, 2000)
     plot1 = plt.plot(fft[c][1], fft[c][0], 'r-',
                      # alpha=0.7
                      )
