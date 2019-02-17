@@ -225,55 +225,57 @@ if __name__ == '__main__':
     fft_right = {}
 
     # Loop through folds and calculate spectrogram and plot data
+    i = 0
     c = 'children_playing'
-    # for c in classes:
-    # Get the file name and the fold it exists in from the dataframe
-    wav_file = df[df.label == c].iloc[0, 0]
-    fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
+    for c in classes:
+        # Get the file name and the fold it exists in from the dataframe
+        wav_file = df[df.label == c].iloc[0, 0]
+        fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
 
-    # Read signal and add it to dict. UrbanSound uses stereo, so there is two channels.
-    signal, sr = sf.read(f'../Datasets/audio/downsampled/fold{fold}/{wav_file}')
+        # Read signal and add it to dict. UrbanSound uses stereo, so there is two channels.
+        signal, sr = sf.read(f'../Datasets/audio/downsampled/fold{fold}/{wav_file}')
 
-    # Separate the stereo audio
-    left_channel, right_channel = separate_stereo_signal(signal)
+        # Separate the stereo audio
+        left_channel, right_channel = separate_stereo_signal(signal)
 
-    mask = envelope(right_channel, sr, threshold=0.005)
+        mask = envelope(right_channel, sr, threshold=0.005)
 
-    signals[c], fft[c], fbank[c], mfccs[c] = extract_features(right_channel[mask], sr,
-                                                              fft=True,
-                                                              fbank=True,
-                                                              mffc=True)
+        signals[c], fft[c], fbank[c], mfccs[c] = extract_features(right_channel[mask], sr,
+                                                                  fft=True,
+                                                                  fbank=True,
+                                                                  mffc=True)
 
-    signals_right[c], fft_right[c], fbank[c], mfccs[c] = extract_features(right_channel, sr,
-                                                              fft=True,
-                                                              fbank=True,
-                                                              mffc=True)
+        signals_right[c], fft_right[c], fbank[c], mfccs[c] = extract_features(right_channel, sr,
+                                                                  fft=True,
+                                                                  fbank=True,
+                                                                  mffc=True)
+        i += 1
+        if i == 4:
+            break
 
     # Plot
-    plt.title('Children playing')
-
-    plt.plot(signals_right[c], 'b')
-    plt.plot(signals[c], 'r')
-    plt.legend(('Before thresholding', 'After thresholding'))
-    plt.show()
-
-    plt.title('Children playing')
-    plt.ylim((0, 0.00150))
-    plt.xlim(-200, 2000)
-    plot1 = plt.plot(fft[c][1], fft[c][0], 'r-',
-                     # alpha=0.7
-                     )
-    plot2 = plt.plot(fft_right[c][1], fft_right[c][0], 'b')
-
-    plt.legend(('After thresholding', 'Before thresholding'))
-    # plt.legend(['Before thresholding'])
-    plt.show()
-
-
+    # plt.title('Children playing')
+    #
+    # plt.plot(signals_right[c], 'b')
+    # plt.plot(signals[c], 'r')
+    # plt.legend(('Before thresholding', 'After thresholding'))
+    # plt.show()
+    #
+    # plt.title('Children playing')
+    # plt.ylim((0, 0.00150))
+    # plt.xlim(-200, 2000)
+    # plot1 = plt.plot(fft[c][1], fft[c][0], 'r-',
+    #                  # alpha=0.7
+    #                  )
+    # plot2 = plt.plot(fft_right[c][1], fft_right[c][0], 'b')
+    #
+    # plt.legend(('After thresholding', 'Before thresholding'))
+    # # plt.legend(['Before thresholding'])
+    # plt.show()
 
     # If true, plot data
-    # if args.plot == 'True':
-    #     plot_data(signals, fbank, mfccs, fft)
+    if args.plot == 'True':
+        plot_data(signals, fbank, mfccs, fft)
 
     # Store in clean directory
     # for wav_file in tqdm(df.slice_file_name):

@@ -40,14 +40,14 @@ def plot_signals(signals, channel='stereo'):
 	:param signals:
 	:return:
 	"""
-	fig, axes = plt.subplots(nrows=2, ncols=5, sharex=False,
+	fig, axes = plt.subplots(nrows=1, ncols=4, sharex=False,
 							 sharey=True, figsize=(20, 5))
 
 	fig.suptitle(f'Time Series - {channel}', size=16)
 
 	i = 0
-	for x in range(2):
-		for y in range(5):
+	for x in range(1):
+		for y in range(4):
 			axes[x, y].set_title(list(signals.keys())[i], fontsize=30)
 			axes[x, y].plot(list(signals.values())[i])
 			axes[x, y].get_xaxis().set_visible(False)

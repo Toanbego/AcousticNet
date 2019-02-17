@@ -3,7 +3,8 @@ import argparse
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-import keras.callbacks as callbacks
+
+from keras.models import load_model
 from keras.layers import Conv2D, MaxPool2D, Flatten
 from keras.layers import Dropout, Dense
 from keras.models import Sequential
@@ -14,6 +15,7 @@ from tqdm import tqdm
 from python_speech_features import mfcc, fbank, logfbank
 import soundfile as sf
 import preprocess_data
+import tensorflow as tf
 
 # Parse the config.ini file
 config = configparser.ConfigParser()
@@ -58,6 +60,7 @@ class TrainAudioClassificator:
         self.save_features = config['preprocessing'].getboolean('save_features')
         self.load_features = config['preprocessing'].getboolean('load_features')
         self.load_file = config['preprocessing']['load_file']
+        self.randomize_rolls = config['preprocessing'].getboolean('randomize_rolls')
         self.feature = config['preprocessing']['feature']
         self.n_filt = config['preprocessing'].getint('n_filt')
         self.n_feat = config['preprocessing'].getint('n_feat')
@@ -73,8 +76,11 @@ class TrainAudioClassificator:
         self.optimizer = config['model']['optimizer']
         self.batch_size = config['model'].getint('batch_size')
 
+        self.load_weights = config['model'].getboolean('load_weights')
+        self.load_model_path = config['model']['load_model']
+
         # Parameters to be initiated at a later stage
-        self.class_weight = None                #
+        self.class_weight = None
         self.input_shape = None
         self.model = None
         self.features = None
@@ -87,9 +93,29 @@ class TrainAudioClassificator:
         Methods compiles the specified model. Currently only CNN is available.
         :return:
         """
+        # Load weights if activated
+        if self.load_weights is True:
+            self.model = load_model(self.load_model_path)
+
         # Define input shape and compile model
-        self.input_shape = (train_x.shape[1], train_x.shape[2], 1)
-        self.model = self.convolutional_model()
+        else:
+            self.input_shape = (train_x.shape[1], train_x.shape[2], 1)
+            self.model = self.convolutional_model()
+
+        # Set up tensorboard and checkpoint monitoring
+        tb_callbacks = TensorBoard(log_dir='./logs', histogram_freq=0, batch_size=self.batch_size, write_graph=True,
+                                   write_grads=True, write_images=False, embeddings_freq=0,
+                                   embeddings_layer_names=None, embeddings_metadata=None, embeddings_data=None,
+                                   update_freq=20000)
+
+        checkpoint = ModelCheckpoint('weights/weights.{epoch:02d}-{val_acc:.2f}.hdf5',
+                                     monitor='val_acc',
+                                     verbose=1,
+                                     save_best_only=True,
+                                     save_weights_only=False,
+                                     mode='auto',
+                                     period=1)
+        self.callbacks_list = [checkpoint, tb_callbacks]
 
     def convolutional_model(self):
         """
@@ -98,17 +124,19 @@ class TrainAudioClassificator:
         """
 
         model = Sequential()
-        model.add(Conv2D(16, (3, 3), activation='relu', strides=(1, 1),
+        model.add(Conv2D(16, (2, 2), activation='relu', strides=(1, 1),
                          padding='same', input_shape=self.input_shape))
+        model.add(Dropout(0.2))
         model.add(Conv2D(32, (3, 3), activation='relu', strides=(1, 1),
                          padding='same', ))
         model.add(Dropout(0.3))
-        model.add(MaxPool2D((2, 2)))
-        model.add(Conv2D(64, (3, 3), activation='relu', strides=(1, 1),
-                         padding='same', ))
+
         model.add(Conv2D(64, (3, 3), activation='relu', strides=(1, 1),
                          padding='same', ))
         model.add(Conv2D(128, (3, 3), activation='relu', strides=(1, 1),
+                         padding='same', ))
+
+        model.add(Conv2D(256, (3, 3), activation='relu', strides=(2, 2),
                          padding='same', ))
 
         model.add(MaxPool2D((2, 2)))
@@ -123,19 +151,7 @@ class TrainAudioClassificator:
                       optimizer=self.optimizer,
                       metrics=['accuracy'])
 
-        tb_callbacks = TensorBoard(log_dir='./logs', histogram_freq=0, batch_size=self.batch_size, write_graph=True,
-                                   write_grads=True, write_images=False, embeddings_freq=0,
-                                   embeddings_layer_names=None, embeddings_metadata=None, embeddings_data=None,
-                                   update_freq=100000)
 
-        checkpoint = ModelCheckpoint('weights/weights.{epoch:02d}-{val_acc:.2f}.hdf5',
-                                     monitor='val_acc',
-                                     verbose=1,
-                                     save_best_only=True,
-                                     save_weights_only=False,
-                                     mode='auto',
-                                     period=1)
-        self.callbacks_list = [checkpoint, tb_callbacks]
         return model
 
     def build_feature_from_signal(self, file_path, feature_to_extract='mfcc', activate_threshold=False):
@@ -145,7 +161,8 @@ class TrainAudioClassificator:
 
         Later implementations should consist of using both channels, and being able to select other features than mfccs
         :param feature_to_extract: Choose what feature to extract. Current alternatives: 'mffc', 'fbank' and 'logfbank'
-        :param file_path:
+        :param file_path: File path to audio file
+        :param activate_threshold: A lower boundary to filter out weak signals
         :return:
         """
         # Read file
@@ -371,7 +388,7 @@ class TrainAudioClassificator:
                        validation_data=(x_test, y_test)
                        )
 
-    def separate_loaded_data(self, nr_rolls=0):
+    def separate_loaded_data(self, nr_rolls=5):
         """
         When the UrbanSounds data is loaded, it will be loaded as a tuple of size 10.
         Each tuple contains the array with all the features extracted from that fold.
@@ -382,9 +399,14 @@ class TrainAudioClassificator:
         # TODO: The function always returns the last 10% as test. Should be able to put in argument that
         #       allows to choose other folds.
 
+        # Randomize the roll if set to True
+        if self.randomize_rolls is True:
+            nr_rolls = np.random.randint(0, 10)
+            print(f"Validating on fold{(10-nr_rolls)}")
+
         # If nr_rolls is specified, rotate the data set
-        # self.x = self.x[nr_rolls:] + self.x[:nr_rolls]
-        # self.y = self.y[nr_rolls:] + self.y[:nr_rolls]
+        self.x = np.roll(self.x, nr_rolls, axis=0)
+        self.y = np.roll(self.y, nr_rolls, axis=0)
 
         # Concatenate the array
         x_train = np.concatenate(self.x[:-1], axis=0)
