@@ -40,14 +40,14 @@ def plot_signals(signals, channel='stereo'):
 	:param signals:
 	:return:
 	"""
-	fig, axes = plt.subplots(nrows=1, ncols=4, sharex=False,
+	fig, axes = plt.subplots(nrows=2, ncols=5, sharex=False,
 							 sharey=True, figsize=(20, 5))
 
 	fig.suptitle(f'Time Series - {channel}', size=16)
 
 	i = 0
-	for x in range(1):
-		for y in range(4):
+	for x in range(2):
+		for y in range(5):
 			axes[x, y].set_title(list(signals.keys())[i], fontsize=30)
 			axes[x, y].plot(list(signals.values())[i])
 			axes[x, y].get_xaxis().set_visible(False)
@@ -116,7 +116,7 @@ def plot_mfccs(mfccs):
 			i += 1
 
 
-def plot_class_distribution(class_dist):
+def plot_class_distribution(class_dist, labels=None):
 	"""
 	Plots a cake diagram of the distribution of the various classes
 	of the UrbanSound dataset
@@ -126,7 +126,11 @@ def plot_class_distribution(class_dist):
 	# Plot the distribution
 	fig, ax = plt.subplots()
 	ax.set_title('Class Distribution', y=1.08)
-	ax.pie(class_dist, labels=class_dist.index, shadow=False, autopct='%1.1f%%', startangle=90)
+	if labels is None:
+		ax.pie(class_dist, labels=class_dist.index, shadow=False, autopct='%1.1f%%', startangle=90)
+	else:
+		# ax.pie(class_dist, labels=list(np.unique(labels['label'])), shadow=False, autopct='%1.1f%%', startangle=90)
+		ax.pie(class_dist, labels=labels, shadow=False, autopct='%1.1f%%', startangle=90)
 	ax.axis('equal')
 	plt.show()
 	# df.reset_index(inplace=True)
