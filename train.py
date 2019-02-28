@@ -60,7 +60,13 @@ class TrainAudioClassificator:
         self.df = df
 
         # Find classes and create class distribution
-        self.classes = ['air_conditioner', 'engine_idling', 'siren', 'street_music', 'drilling']
+        self.classes = ['air_conditioner',
+                        'engine_idling',
+                        'siren',
+                        'street_music',
+                        'drilling',
+                        'jackhammer',
+                        'dog_bark']
         # self.classes = list(np.unique(df['label']))
         self.class_dist = df.groupby(['label'])['length'].mean()
         self.prob_dist = self.class_dist / self.class_dist.sum()
@@ -141,46 +147,46 @@ class TrainAudioClassificator:
         A novel convolutional model network
         :return:
         """
-        # TODO: try defining a learning rate
         model = Sequential()
 
+        # Upsampling
+        model.add(Conv2DTranspose(8, (3, 3), strides=(2, 2),
+                                  padding='same', activation='relu', input_shape=self.input_shape))
+
+        model.add(Dropout(0.1))
+        model.add(BatchNormalization())
+
         # VGG - 1 - Conv
-        model.add(Conv2D(256, (3, 3), activation='relu', strides=(1, 1),
+        model.add(Conv2D(16, (3, 3), activation='relu', strides=(1, 1),
                          padding='same', input_shape=self.input_shape))
         model.add(Dropout(0.1))
         model.add(BatchNormalization())
 
-        # Upsampling
-        model.add(Conv2DTranspose(128, (2, 2), strides=(2, 2), padding='same', activation='relu'))
-        # model.add(Conv2D(32, (3, 3), activation='relu', strides=(2, 2),
-        #                  padding='same', ))
-        model.add(Dropout(0.1))
-        model.add(BatchNormalization())
-
         # VGG - 2 - Conv
-        model.add(Conv2D(128, (3, 3), activation='relu', strides=(1, 1),
+        model.add(Conv2D(32, (3, 3), activation='relu', strides=(1, 1),
                          padding='same', ))
         model.add(Dropout(0.1))
         model.add(BatchNormalization())
 
-        # Upsampling
-        # model.add(Conv2D(128, (3, 3), activation='relu', strides=(2, 2),
-        #                  padding='same', ))
-        model.add(Conv2DTranspose(32, (2, 2), strides=(1, 1), padding='same', activation='relu'))
+        # VGG - 3 - Conv
+        model.add(Conv2D(64, (3, 3), activation='relu', strides=(2, 2),
+                         padding='same', ))
+        model.add(Dropout(0.1))
+        model.add(BatchNormalization())
 
         # VGG - 3 - Conv
-        model.add(Conv2D(16, (3, 3), activation='relu', strides=(2, 2),
+        model.add(Conv2D(64, (3, 3), activation='relu', strides=(2, 2),
                          padding='same', ))
         model.add(Dropout(0.1))
         model.add(BatchNormalization())
 
         # VGG - 4 - FCC
         model.add(Flatten())
-        model.add(Dense(128, activation='relu'))
         model.add(Dense(64, activation='relu'))
+        # model.add(Dense(16, activation='relu'))
 
         # VGG - 5 Output
-        model.add(Dense(self.y.shape[-1], activation='softmax'))
+        model.add(Dense(6, activation='softmax'))
 
         # Print summary and compile model
         model.summary()
@@ -203,13 +209,13 @@ class TrainAudioClassificator:
         """
         # Read file
         sample, rate = sf.read(file_path)
-        # TODO: Find the minimum length of a signal as use that as step length
-        #       Right now the smallest signals of 0.05 seconds is just skipped. Though there are only like three.
+
 
         # If len is > 1 it means the signal is stereo and needs to be split up
         if len(sample.shape) > 1:
             sample, signal_2 = preprocess_data.separate_stereo_signal(sample)
-
+        length = sample.shape[0] / rate
+        print(length)
         # Choose a window of the signal to use for the sample
         try:
             rand_index = np.random.randint(0, sample.shape[0] - self.step)
@@ -219,7 +225,7 @@ class TrainAudioClassificator:
         except ValueError:
             print("audio file to small. Skip and move to next")
             return 'move to next file'
-
+        exit()
         # Perform filtering with a threshold on the time signal
         if activate_threshold is True:
             mask = preprocess_data.envelope(sample, rate, self.threshold)
@@ -231,12 +237,14 @@ class TrainAudioClassificator:
                           numcep=self.n_feat,
                           nfilt=self.n_filt,
                           nfft=self.n_fft).T
+            plotting_functions.plot_mfccs(sample)
 
         # Extract the log mel frequency filter banks
         elif feature_to_extract == 'logfbank':
             sample = logfbank(sample, rate,
                               nfilt=self.n_filt,
                               nfft=self.n_fft).T
+            plotting_functions.plot_log(sample)
 
         # Extract the mel frequency filter banks
         elif feature_to_extract == 'fbank':
@@ -271,6 +279,13 @@ class TrainAudioClassificator:
             # samples_per_fold = 2 * int(files_in_fold['length'].sum() / 0.1)  # the number of samples for each fold
             samples_per_fold = self.n_samples
 
+            # for c in self.classes:
+            #     print(c)
+            #     class_in_fold = self.df.loc[self.df.label == c]
+            #     print(len(class_in_fold))
+            #     class_in_fold = self.df.loc[self.df.label == c]['length'].sum()
+            #     print(class_in_fold)
+
             # Loop through the files in the fold
             for _ in tqdm(range(samples_per_fold)):
 
@@ -278,8 +293,8 @@ class TrainAudioClassificator:
                 # rand_class = np.random.choice(self.class_dist.index, p=self.prob_dist)
                 rand_class = np.random.choice(self.classes)
                 file = np.random.choice(files_in_fold[self.df.label == rand_class].slice_file_name)
-                file_path = f'../Datasets/audio/downsampled/fold{fold}/{file}'
-
+                file_path = f'../Datasets/audio/original/fold{fold}/{file}'
+                print(rand_class)
                 # Extract feature from signal
                 x_sample = self.build_feature_from_signal(file_path,
                                                           feature_to_extract=self.feature,
@@ -407,9 +422,8 @@ class TrainAudioClassificator:
         y_true = []
 
         # Loop through validation set
-        i = 0
+
         for sample, label in tqdm(zip(x_test, y_test)):
-            i += 1
             sample = np.resize(sample, (1,
                                         sample.shape[0],
                                         sample.shape[1],
@@ -418,8 +432,6 @@ class TrainAudioClassificator:
 
             y_pred.append(self.classes[np.argmax(prediction)])      # Append the prediction to the list
             y_true.append(self.classes[np.argmax(label)])
-            if i == 1000:
-                break
 
         # Create confusion matrix calculate accuracy
         matrix = confusion_matrix(y_true, y_pred, self.classes)
@@ -478,7 +490,6 @@ class TrainAudioClassificator:
 
         # print(np.sum(y_train, axis=0))
 
-
         return x_train, y_train, x_test, y_test, x_val, y_val
 
     def load_and_extract_features(self, filepath):
@@ -509,7 +520,7 @@ def run(audio_model):
         audio_model.load_and_extract_features(audio_model.load_file)
 
         # Create train and validation split
-        x_train, y_train, _, _, x_val, y_val= audio_model.separate_loaded_data()
+        x_train, y_train, _, _, x_val, y_val = audio_model.separate_loaded_data()
 
         # Compile model
         audio_model.set_up_model(x_train)
@@ -529,11 +540,11 @@ def run(audio_model):
         # Create train and validation split
         _, _, x_test, y_test, _, _ = audio_model.separate_loaded_data()
 
-        # # Compile model
-        # audio_model.set_up_model(x_test)
-        #
-        # # Test network
-        # audio_model.test(x_test, y_test)
+        # Compile model
+        audio_model.set_up_model(x_test)
+
+        # Test network
+        audio_model.test(x_test, y_test)
 
     else:
         raise ValueError('Choose a valid Mode')
