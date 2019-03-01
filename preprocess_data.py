@@ -11,6 +11,7 @@ The script is also used to clean and downsample signals so they are of equal len
 
 import pandas as pd
 import argparse
+import pywt
 
 import ffmpeg
 from scipy.signal import resample
@@ -20,7 +21,7 @@ from tqdm import tqdm
 import librosa
 from scipy.io import wavfile
 import soundfile as sf
-from python_speech_features import mfcc, logfbank, fbank, sigproc
+from python_speech_features import mfcc, logfbank, fbank, sigproc, delta
 import wave
 import numpy as np
 import csv
@@ -28,6 +29,7 @@ from matplotlib import pyplot as plt
 from matplotlib import axes as ax
 import plotting_functions
 
+# TODO:  Look at delta-delta
 
 def parse_arguments():
     """
@@ -45,23 +47,12 @@ def parse_arguments():
                         help='activate to downsample and clean files',
                         default='False')
 
+    parser.add_argument('--mask', '-m', type=str,
+                        help='activate to use thresholding when downsampling the files',
+                        default='False')
+
     args = parser.parse_args()
     return args
-
-def fetch_labels_youtube(file_path="../Datasets/balanced_train_segments.csv"):
-    """
-    Load the csv file for the YouTube data set
-    :return:
-    """
-
-    with open(file_path, 'r') as csvfile:
-        df = csv.reader(csvfile, delimiter=' ', quotechar='"')
-        i = 0
-        for row in df:
-            i += 1
-            print(', '.join(row))
-        print(f'There is {i} samples in the data')
-        print(df)
 
 
 def add_length_to_column(df):
@@ -77,10 +68,10 @@ def add_length_to_column(df):
 
     # Loop through audio files and check the length of the file
     for f, fold in tqdm(zip(df.index, df.fold)):
-        signal, rate = sf.read(f'../Datasets/audio/fold{fold}/{f}')
+        signal, rate = sf.read(f'../Datasets/audio/new_test/fold{fold}/{f}')
         df.at[f, 'length'] = signal.shape[0] / rate
 
-    df.to_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_length.csv')
+    df.to_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_length_NewTest.csv')
     return df
 
 
@@ -108,17 +99,17 @@ def separate_stereo_signal(y):
     if y.shape[0] > y.shape[1]:
         channels = np.array(y).T
 
-        left_channel = channels[0]
-        right_channel = channels[1]
+        left = channels[0]
+        right = channels[1]
 
     elif y.shape[1] > y.shape[0]:
         # y = np.reshape(y, (y.shape[1], y.shape[0]))
         channels = np.array(y)
 
-        left_channel = channels[0]
-        right_channel = channels[1]
+        left = channels[0]
+        right = channels[1]
 
-    return left_channel, right_channel
+    return left, right
 
 
 def envelope(y, rate, threshold, dynamic_threshold=True):
@@ -158,8 +149,11 @@ def resample_signal(y, orig_sr, target_sr):
     :return:
     """
 
+    if orig_sr == target_sr:
+        return y
+
     # 1 - step
-    ratio = float(16000) / sr
+    ratio = float(target_sr) / sr
     n_samples = int(np.ceil(y.shape[-1] * ratio))
 
     # 2 - step
@@ -214,7 +208,7 @@ def extract_features(signal, rate, clean=False, fft=False, filterbank=False, mff
 
         else:
             mask = envelope(signal, rate, threshold=threshold, dynamic_threshold=False)
-        print(mask.sum())
+
         # Mask the signal
         signal = signal[mask]
 
@@ -285,47 +279,50 @@ if __name__ == '__main__':
 
     # Dicts for things we want to store
     signals = {}
-    signals_clean = {}
-    signals_left = {}
-    signals_right = {}
     mfccs = {}
     filterbank = {}
+    f_bank = {}
     fft = {}
-    fft_clean = {}
-    fft_left = {}
-    fft_right = {}
+
 
     # Loop through folds and calculate spectrogram and plot data
     i = 0
     c = 'street_music'
-    #
-    # for c in classes:
-    #     # Get the file name and the fold it exists in from the dataframe
-    #     wav_file = df[df.label == c].iloc[0, 0]
-    #     fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
-    #
-    #     # Read signal and add it to dict. UrbanSound uses stereo, so there is two channels.
-    #     signal, sr = sf.read(f'../Datasets/audio/original/fold{fold}/{wav_file}')
-    #     step = int(sr/4)
-    #     # Separate the stereo audio
-    #     left_channel, right_channel = separate_stereo_signal(signal)
-    #
-    #     # mask = envelope(right_channel, sr, threshold=0.007)
-    #
-    #     rand_index = np.random.randint(0, right_channel.shape[0] - step)
-    #     right_channel = right_channel[rand_index:rand_index + step]
-    #
-    #     signals[c], fft[c], filterbank[c], mfccs[c] = extract_features(right_channel, sr,
-    #                                                                    clean=False,
-    #                                                                    fft=True,
-    #                                                                    filterbank=True,
-    #                                                                    mffc=True,
-    #                                                                    dynamic_threshold=False)
-    #
-    #     signals_right[c], fft_right[c], filterbank[c], mfccs[c] = extract_features(signal, sr,
-    #                                                                                fft=True,
-    #                                                                                filterbank=True,
-    #                                                                                mffc=True)
+
+    for c in classes:
+        # Get the file name and the fold it exists in from the dataframe
+        wav_file = df[df.label == c].iloc[0, 0]
+        fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
+
+        # Read signal and add it to dict. UrbanSound uses stereo which is made mono
+        signal, sr = sf.read(f'../Datasets/audio/original/fold{fold}/{wav_file}')
+        signal = make_signal_mono(signal)
+
+        # step = signal.shape[0]/sr
+        #
+        # # mask = envelope(right_channel, sr, threshold=0.007)
+        #
+        # rand_index = np.random.randint(0, signal.shape[0] - step)
+        # signal = signal[rand_index:rand_index + step]
+
+        signals[c], fft[c], filterbank[c], mfccs[c] = extract_features(signal, sr,
+                                                                       clean=False,
+                                                                       fft=True,
+                                                                       filterbank=True,
+                                                                       mffc=True,
+                                                                       dynamic_threshold=False)
+        f_bank[c] = fbank(signal, sr, nfilt=26, nfft=1103).T
+
+
+        plt.imshow(mfccs[c], cmap='hot', interpolation='nearest')
+        plt.show()
+        plt.imshow(filterbank[c], cmap='hot', interpolation='nearest')
+        plt.show()
+        plt.imshow(mfccs[c], cmap='hot', interpolation='nearest')
+        plt.show()
+        # plt.plot(mfccs[c])
+        # plt.show()
+
 
     # Plot
     # plt.title(c)
@@ -344,7 +341,7 @@ if __name__ == '__main__':
     # plot2 = plt.plot(fft_right[c][1], fft_right[c][0], 'b')
 
     # plt.legend(('After thresholding', 'Before thresholding'))
-    # # plt.legend(['Before thresholding'])
+    # plt.legend(['Before thresholding'])
     # plt.show()
 
     # for c in signals:
@@ -364,134 +361,19 @@ if __name__ == '__main__':
             fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
             file_name = f'../Datasets/audio/original/fold{fold}/{wav_file}'
 
+            # Read file, monotize if stereo and resample
             signal, sr = sf.read(file_name)
-            # print(signal.shape[0]/sr)
-
             signal = make_signal_mono(signal)
-            signal_hat = resample_signal(signal, orig_sr=sr, target_sr=16000)
-            # print(signal.shape[0] / sr)
+            signal_hat = resample_signal(signal, orig_sr=sr, target_sr=22050)
 
-            # Filter signal
-            mask = envelope(signal_hat, sr, threshold=0.005)
-            # plt.ylim(-1, 1)
-            #
-            # plt.plot(signal_hat[mask])
-            # plt.show()
-            # exit()
+            # Apply thresholding if true
+            if args.mask == 'True':
+                mask = envelope(signal_hat, sr, threshold=0.005)
 
             # Write to file
-            wavfile.write(filename=f'../Datasets/audio/new_test/fold{fold}/{wav_file}',
+            wavfile.write(filename=f'../Datasets/audio/new_test_22050/fold{fold}/{wav_file}',
                           rate=16000,
-                          data=signal_hat[mask])
-
-            # # FIRST SIGNAL
-            # signal, sr = librosa.load(file_name, sr=44100)
-            # # signal, _ = separate_stereo_signal(signal)
-            # signal1 = librosa.resample(signal, sr, 16000)
-            # plt.ylim(-1, 1)
-            #
-            # plt.plot(signal1)
-            #
-            # # signal_fft = calc_fft(signal1, sr)
-            # # fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True, figsize=(15, 10))
-            # #
-            # # ax1.plot(signal1)
-            # # ax2.plot(signal_fft[1], signal_fft[0])
-            # plt.show()
-            #
-            # # Downsample signal
-            # # 1 - step
-            # # ratio = float(16000) / sr
-            # # n_samples = int(np.ceil(signal.shape[-1] * ratio))
-            # #
-            # # # 2 - step
-            # # signal2 = resampy.resample(signal, sr, 16000, filter='kaiser_best', axis=-1)
-            # #
-            # # # 3-step
-            # # n = signal2.shape[-1]
-            # #
-            # # if n > n_samples:
-            # #     slices = [slice(None)] * signal2.ndim
-            # #     slices[-1] = slice(0, n_samples)
-            # #     signal2 = signal2[tuple(slices)]
-            # #
-            # # elif n < n_samples:
-            # #     lengths = [(0, 0)] * signal2.ndim
-            # #     lengths[-1] = (0, n_samples - n)
-            # #     signal2 = np.pad(signal2, lengths, 'constant')
-            # #
-            # # # 4 - step
-            # # signal2 = np.ascontiguousarray(signal2)
-            # #
-            #
-            # # signal_fft2 = calc_fft(signal2, 16000)
-            # #
-            # # fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True, figsize=(15, 10))
-            # #
-            # # ax1.plot(signal2)
-            # # ax2.plot(signal_fft2[1], signal_fft2[0])
-            #
-            # plt.show()
-            #
-            # # LAST NYTT SIGNAL HER
-            # signal, sr = sf.read(file_name)
-            #
-            # # 1 - step
-            # ratio = float(16000) / sr
-            # n_samples = int(np.ceil(signal.shape[-1] * ratio))
-            #
-            # # 2 - step
-            # # signal2 = resample(signal, n_samples, axis=-1)
-            # signal2 = resampy.resample(signal, sr, 16000, filter='kaiser_best', axis=-1)
-            #
-            # # 3-step
-            # n = signal2.shape[-1]
-            #
-            # if n > n_samples:
-            #     slices = [slice(None)] * signal2.ndim
-            #     slices[-1] = slice(0, n_samples)
-            #     signal2 = signal2[tuple(slices)]
-            #
-            # elif n < n_samples:
-            #     lengths = [(0, 0)] * signal2.ndim
-            #     lengths[-1] = (0, n_samples - n)
-            #     signal2 = np.pad(signal2, lengths, 'constant')
-            #
-            # # 4 - step
-            # signal2 = np.ascontiguousarray(signal2)
-            #
-            # plt.ylim(-1, 1)
-            # plt.plot(signal2)
-            # plt.show()
-            #
-            # # print(sr)
-            # # if signal.shape[1] > 1:
-            # #     signal = signal.reshape((-1, signal.shape[1])).T
-            # #     signal = np.mean(signal, axis=0)
-            # # # _, signal = separate_stereo_signal(signal)
-            # # signal_fft = calc_fft(signal, sr)
-            # # fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True, figsize=(15, 10))
-            # #
-            # # ax1.plot(signal, '-r')
-            # # ax2.plot(signal_fft[1], signal_fft[0], '-r')
-            #
-            # # # Downsample signal
-            # # signal2 = resample(signal, 16000)
-            # # signal_fft2 = calc_fft(signal2, 16000)
-            # #
-            # # fig, (ax1, ax2) = plt.subplots(1, 2, sharey=True, figsize=(15, 10))
-            # #
-            # # ax1.plot(signal2, '-r')
-            # # ax2.plot(signal_fft2[1], signal_fft2[0], '-r')
-            #
-            # # plt.show()
-            #
-            #
-            # # Filter signal
-            # mask = envelope(signal, sr, threshold=0.005)
-            #
-            # # Write to file
-            # wavfile.write(filename=f'../Datasets/audio/new_test/fold{fold}/{wav_file}', rate=16000, data=signal)
+                          data=signal_hat)
 
 
 

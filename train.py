@@ -60,13 +60,16 @@ class TrainAudioClassificator:
         self.df = df
 
         # Find classes and create class distribution
-        self.classes = ['air_conditioner',
+        self.classes = [
+                        # 'children_playing',
+                        'air_conditioner',
                         'engine_idling',
-                        'siren',
-                        'street_music',
+                        # 'siren',
+                        # 'street_music',
                         'drilling',
                         'jackhammer',
-                        'dog_bark']
+                        # 'dog_bark'
+                        ]
         # self.classes = list(np.unique(df['label']))
         self.class_dist = df.groupby(['label'])['length'].mean()
         self.prob_dist = self.class_dist / self.class_dist.sum()
@@ -81,7 +84,7 @@ class TrainAudioClassificator:
         self.n_feat = config['preprocessing'].getint('n_feat')
         self.n_fft = config['preprocessing'].getint('n_fft')
         self.rate = config['preprocessing'].getint('rate')
-        self.step = int(self.rate / config['preprocessing'].getfloat('step_size'))
+        self.step = int(self.rate * config['preprocessing'].getfloat('step_size'))
         self.activate_threshold = config['preprocessing'].getboolean('activate_threshold')
         self.threshold = config['preprocessing'].getfloat('threshold')
         self.n_samples = config['preprocessing'].getint('n_samples')
@@ -150,43 +153,43 @@ class TrainAudioClassificator:
         model = Sequential()
 
         # Upsampling
-        model.add(Conv2DTranspose(8, (3, 3), strides=(2, 2),
+        model.add(Conv2DTranspose(32, (1, 1), strides=(2, 2),
                                   padding='same', activation='relu', input_shape=self.input_shape))
 
         model.add(Dropout(0.1))
-        model.add(BatchNormalization())
+        # model.add(BatchNormalization())
 
         # VGG - 1 - Conv
-        model.add(Conv2D(16, (3, 3), activation='relu', strides=(1, 1),
+        model.add(Conv2D(256, (1, 1), activation='relu', strides=(1, 1),
                          padding='same', input_shape=self.input_shape))
         model.add(Dropout(0.1))
-        model.add(BatchNormalization())
+        # model.add(BatchNormalization())
 
         # VGG - 2 - Conv
-        model.add(Conv2D(32, (3, 3), activation='relu', strides=(1, 1),
+        model.add(Conv2D(128, (1, 1), activation='relu', strides=(1, 1),
                          padding='same', ))
         model.add(Dropout(0.1))
-        model.add(BatchNormalization())
+        # model.add(BatchNormalization())
 
         # VGG - 3 - Conv
-        model.add(Conv2D(64, (3, 3), activation='relu', strides=(2, 2),
+        model.add(Conv2D(64, (2, 2), activation='relu', strides=(1, 1),
                          padding='same', ))
         model.add(Dropout(0.1))
-        model.add(BatchNormalization())
+        # model.add(BatchNormalization())
 
         # VGG - 3 - Conv
-        model.add(Conv2D(64, (3, 3), activation='relu', strides=(2, 2),
+        model.add(Conv2D(64, (2, 2), activation='relu', strides=(2, 2),
                          padding='same', ))
         model.add(Dropout(0.1))
         model.add(BatchNormalization())
 
         # VGG - 4 - FCC
         model.add(Flatten())
-        model.add(Dense(64, activation='relu'))
+        model.add(Dense(128, activation='relu'))
         # model.add(Dense(16, activation='relu'))
 
         # VGG - 5 Output
-        model.add(Dense(6, activation='softmax'))
+        model.add(Dense(len(self.y[0][0]), activation='softmax'))
 
         # Print summary and compile model
         model.summary()
@@ -195,6 +198,15 @@ class TrainAudioClassificator:
                       metrics=['acc'])
 
         return model
+
+    def select_random_audio_clip(self, sample):
+        """
+        Selects a part of the audio file at random. length of clip is defined by self.step
+        :return:
+        """
+
+        rand_index = np.random.randint(0, sample.shape[0] - self.step)
+        return sample[rand_index:rand_index + self.step]
 
     def build_feature_from_signal(self, file_path, feature_to_extract='mfcc', activate_threshold=False):
         """
@@ -209,23 +221,16 @@ class TrainAudioClassificator:
         """
         # Read file
         sample, rate = sf.read(file_path)
+        sample = preprocess_data.make_signal_mono(sample)
 
-
-        # If len is > 1 it means the signal is stereo and needs to be split up
-        if len(sample.shape) > 1:
-            sample, signal_2 = preprocess_data.separate_stereo_signal(sample)
-        length = sample.shape[0] / rate
-        print(length)
         # Choose a window of the signal to use for the sample
         try:
-            rand_index = np.random.randint(0, sample.shape[0] - self.step)
-            sample = sample[rand_index:rand_index + self.step]
-
+            sample = self.select_random_audio_clip(sample)
 
         except ValueError:
             print("audio file to small. Skip and move to next")
             return 'move to next file'
-        exit()
+
         # Perform filtering with a threshold on the time signal
         if activate_threshold is True:
             mask = preprocess_data.envelope(sample, rate, self.threshold)
@@ -233,27 +238,31 @@ class TrainAudioClassificator:
 
         # Extracts the mel frequency cepstrum coefficients
         if feature_to_extract == 'mfcc':
-            sample = mfcc(sample, rate,
-                          numcep=self.n_feat,
-                          nfilt=self.n_filt,
-                          nfft=self.n_fft).T
-            plotting_functions.plot_mfccs(sample)
+            sample_hat = mfcc(sample, rate,
+                              numcep=self.n_feat,
+                              nfilt=self.n_filt,
+                              nfft=self.n_fft).T
 
         # Extract the log mel frequency filter banks
         elif feature_to_extract == 'logfbank':
-            sample = logfbank(sample, rate,
+            sample_hat = logfbank(sample, rate,
                               nfilt=self.n_filt,
                               nfft=self.n_fft).T
-            plotting_functions.plot_log(sample)
+
+            # if sample_hat.shape != np.zeros((26, 9)).shape:
+            #     print('stop')
+
 
         # Extract the mel frequency filter banks
         elif feature_to_extract == 'fbank':
-            sample = fbank(sample, rate,
+            sample_hat = fbank(sample, rate,
                            nfilt=self.n_filt,
                            nfft=self.n_fft).T
+            plt.imshow(sample_hat, cmap='hot', interpolation='nearest')
+            plt.show()
         else:
             raise ValueError('Please choose an existing feature: mfcc, logfbank or fbank ')
-        return sample
+        return sample_hat
 
     def preprocess_dataset(self):
         """
@@ -276,25 +285,20 @@ class TrainAudioClassificator:
             x, y = [], []  # Set up lists
             print(f'\nExtracting data from fold{fold}')
             files_in_fold = self.df.loc[self.df.fold == fold]  # Get the filenames that exists in that fold
+            bikkje = self.df.loc[self.df.length < 1]
             # samples_per_fold = 2 * int(files_in_fold['length'].sum() / 0.1)  # the number of samples for each fold
             samples_per_fold = self.n_samples
-
-            # for c in self.classes:
-            #     print(c)
-            #     class_in_fold = self.df.loc[self.df.label == c]
-            #     print(len(class_in_fold))
-            #     class_in_fold = self.df.loc[self.df.label == c]['length'].sum()
-            #     print(class_in_fold)
 
             # Loop through the files in the fold
             for _ in tqdm(range(samples_per_fold)):
 
                 # Pick a random class from the probability distribution and then a random file with that class
                 # rand_class = np.random.choice(self.class_dist.index, p=self.prob_dist)
+
                 rand_class = np.random.choice(self.classes)
                 file = np.random.choice(files_in_fold[self.df.label == rand_class].slice_file_name)
-                file_path = f'../Datasets/audio/original/fold{fold}/{file}'
-                print(rand_class)
+                file_path = f'../Datasets/audio/new_test/fold{fold}/{file}'
+
                 # Extract feature from signal
                 x_sample = self.build_feature_from_signal(file_path,
                                                           feature_to_extract=self.feature,
@@ -333,7 +337,7 @@ class TrainAudioClassificator:
         """
         y_flat = np.argmax(y_train, axis=1)  # Reshape one-hot encode matrix back to string labels
         self.class_weight = compute_class_weight('balanced', np.unique(y_flat), y_flat)
-        # plotting_functions.plot_class_distribution(self.class_weight, self.classes)
+        plotting_functions.plot_class_distribution(self.class_weight, self.classes)
 
     def create_training_data_shuffle(self):
         """
@@ -407,7 +411,7 @@ class TrainAudioClassificator:
                        batch_size=self.batch_size,
                        shuffle=True,
                        callbacks=self.callbacks_list,
-                       # class_weight=self.class_weight,
+                       class_weight=self.class_weight,
                        validation_data=(x_val, y_val)
                        )
 
@@ -422,7 +426,6 @@ class TrainAudioClassificator:
         y_true = []
 
         # Loop through validation set
-
         for sample, label in tqdm(zip(x_test, y_test)):
             sample = np.resize(sample, (1,
                                         sample.shape[0],
@@ -569,7 +572,7 @@ def main():
 
     """
     # Read csv for UrbanSounds
-    df = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_length.csv')
+    df = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_length_NewTest.csv')
 
     # Initialize class
     audio_model = TrainAudioClassificator(df)
