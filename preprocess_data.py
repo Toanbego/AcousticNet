@@ -127,9 +127,9 @@ def envelope(y, rate, threshold, dynamic_threshold=True):
     y = pd.Series(y).apply(np.abs)
     y_mean = y.rolling(window=int(rate / 15), min_periods=1, win_type='hamming', center=True).mean()
 
-    mask = np.greater(y_mean, threshold)
+    m = np.greater(y_mean, threshold)
 
-    return mask
+    return m
 
 
 def make_signal_mono(y):
@@ -220,13 +220,13 @@ def extract_features(signal, rate, clean=False, fft=False, filterbank=False, mff
         list_of_returns.append(fft)
     # Find filter bank coefficients
     if filterbank is True:
-        bank = logfbank(signal[:rate], rate, nfilt=26, nfft=1103).T
-        # bank = fbank(signal[:rate], rate, nfilt=26)[0].T
+        # bank = logfbank(signal, rate, nfilt=26, nfft=1200).T
+        bank = logfbank(signal[:rate], rate, nfilt=26, nfft=1200).T
         list_of_returns.append(bank)
 
     # Find mel frequency
     if mffc is True:
-        mel = mfcc(signal[:rate], rate, numcep=13, nfilt=26, nfft=1103).T
+        mel = mfcc(signal[:rate], rate, numcep=20, nfilt=26, nfft=1200).T
         list_of_returns.append(mel)
 
     return list_of_returns
@@ -284,11 +284,7 @@ if __name__ == '__main__':
     f_bank = {}
     fft = {}
 
-
     # Loop through folds and calculate spectrogram and plot data
-    i = 0
-    c = 'street_music'
-
     for c in classes:
         # Get the file name and the fold it exists in from the dataframe
         wav_file = df[df.label == c].iloc[0, 0]
@@ -296,14 +292,16 @@ if __name__ == '__main__':
 
         # Read signal and add it to dict. UrbanSound uses stereo which is made mono
         signal, sr = sf.read(f'../Datasets/audio/original/fold{fold}/{wav_file}')
-        signal = make_signal_mono(signal)
-
+        # signal = make_signal_mono(signal)
+        # signal = resample_signal(signal, orig_sr=sr, target_sr=16000)
         # step = signal.shape[0]/sr
         #
         # # mask = envelope(right_channel, sr, threshold=0.007)
         #
         # rand_index = np.random.randint(0, signal.shape[0] - step)
         # signal = signal[rand_index:rand_index + step]
+        # signal = make_signal_mono(signal)
+        # signal_hat = resample_signal(signal, orig_sr=sr, target_sr=5000)
 
         signals[c], fft[c], filterbank[c], mfccs[c] = extract_features(signal, sr,
                                                                        clean=False,
@@ -311,19 +309,37 @@ if __name__ == '__main__':
                                                                        filterbank=True,
                                                                        mffc=True,
                                                                        dynamic_threshold=False)
-        f_bank[c] = fbank(signal, sr, nfilt=26, nfft=1103).T
-
-
+        # f_bank[c] = fbank(signal, sr, nfilt=26, nfft=512, winlen=0.025, winstep=0.01)[0].T
+        plt.title(c)
         plt.imshow(mfccs[c], cmap='hot', interpolation='nearest')
         plt.show()
-        plt.imshow(filterbank[c], cmap='hot', interpolation='nearest')
-        plt.show()
-        plt.imshow(mfccs[c], cmap='hot', interpolation='nearest')
-        plt.show()
-        # plt.plot(mfccs[c])
+        # ax = plt.gca()
+        # ax.grid(True)
+        # plt.title(c)
+        # plt.xlim(0, len(signals[c]))
+        # plt.plot(signals[c])
+        # step = len(signals[c])/12
+        #
+        # for xc in range(0, len(signals[c]), int(step)):
+        #     plt.axvline(x=xc, color='black')
+        #     # plt.axvline(x=100000)
+        #     # plt.axvline(x=2.20589566)
+        #
+        # plt.show()
+        # # exit()
+        #
+        # fig, (ax1, ax2, ax3) = plt.subplots(3, 1, sharey=False, sharex=False)
+        #
+        # ax1.set_title(c + ' - filterbank')
+        # ax1.imshow(f_bank[c], cmap='hot', interpolation='nearest')
+        # ax2.set_title(c+' - MFCC')
+        # ax2.imshow(mfccs[c], cmap='hot', interpolation='nearest')
+        # ax3.set_title(c+' - Log Filterbank')
+        # ax3.imshow(filterbank[c], cmap='hot', interpolation='nearest')
         # plt.show()
 
 
+    exit()
     # Plot
     # plt.title(c)
     #
@@ -335,7 +351,7 @@ if __name__ == '__main__':
     # plt.title(c)
     # plt.ylim((0, np.max(fft[c][0]*1.1)))
     # plt.xlim(-200, np.max(fft[c][1]))
-    # plot1 = plt.plot(fft[c][1], fft[c][0], 'r-',
+    # plot1 = plt.plot(fft[c][1], fft[c][0], 'r-')
     #                  # alpha=0.7
     #                  )
     # plot2 = plt.plot(fft_right[c][1], fft_right[c][0], 'b')
@@ -351,11 +367,15 @@ if __name__ == '__main__':
     if args.plot == 'True':
         plot_data(signals, filterbank, mfccs, fft=None)
 
+
+    exit()
+    length_files = df.loc[df['length'] > 3.5]
+    print(length_files)
     # Clean and downsample the wav files
     if args.clean_files == 'True':
 
         # Store in clean directory
-        for wav_file in tqdm(df.slice_file_name):
+        for wav_file in tqdm(length_files.slice_file_name):
 
             # Find filename and filepath
             fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
@@ -364,14 +384,14 @@ if __name__ == '__main__':
             # Read file, monotize if stereo and resample
             signal, sr = sf.read(file_name)
             signal = make_signal_mono(signal)
-            signal_hat = resample_signal(signal, orig_sr=sr, target_sr=22050)
+            signal_hat = resample_signal(signal, orig_sr=sr, target_sr=16000)
 
             # Apply thresholding if true
             if args.mask == 'True':
                 mask = envelope(signal_hat, sr, threshold=0.005)
 
             # Write to file
-            wavfile.write(filename=f'../Datasets/audio/new_test_22050/fold{fold}/{wav_file}',
+            wavfile.write(filename=f'../Datasets/audio/lengthy_audio/fold{fold}/{wav_file}',
                           rate=16000,
                           data=signal_hat)
 
