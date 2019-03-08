@@ -21,7 +21,8 @@ from tqdm import tqdm
 import librosa
 from scipy.io import wavfile
 import soundfile as sf
-from python_speech_features import mfcc, logfbank, fbank, sigproc, delta
+from python_speech_features import mfcc, logfbank, fbank, sigproc, delta, get_filterbanks
+from python_speech_features import sigproc
 import wave
 import numpy as np
 import csv
@@ -30,6 +31,7 @@ from matplotlib import axes as ax
 import plotting_functions
 
 # TODO:  Look at delta-delta
+
 
 def parse_arguments():
     """
@@ -84,7 +86,6 @@ def calc_fft(y, rate):
     """
     n = len(y)
     freq = librosa.fft_frequencies(sr=rate, n_fft=n)
-
     magnitude = abs(np.fft.rfft(y) / n)
 
     return magnitude, freq
@@ -221,12 +222,12 @@ def extract_features(signal, rate, clean=False, fft=False, filterbank=False, mff
     # Find filter bank coefficients
     if filterbank is True:
         # bank = logfbank(signal, rate, nfilt=26, nfft=1200).T
-        bank = logfbank(signal[:rate], rate, nfilt=26, nfft=1200).T
+        bank = logfbank(signal, rate, nfilt=35, nfft=1200).T
         list_of_returns.append(bank)
 
     # Find mel frequency
     if mffc is True:
-        mel = mfcc(signal[:rate], rate, numcep=20, nfilt=26, nfft=1200).T
+        mel = mfcc(signal, rate, numcep=13, nfilt=35, nfft=1200).T
         list_of_returns.append(mel)
 
     return list_of_returns
@@ -261,6 +262,39 @@ def plot_data(signals=None, fbank=None, mfccs=None, fft=None):
         plt.show()
 
 
+def sbank(signal, samplerate=16000, winlen=0.025, winstep=0.01,
+          nfilt=26, nfft=512, lowfreq=0, highfreq=None, preemph=0.97,
+          winfunc=lambda x: np.ones((x,))):
+    """Compute Mel-filterbank energy features from an audio signal.
+
+    :param signal: the audio signal from which to compute features. Should be an N*1 array
+    :param samplerate: the samplerate of the signal we are working with.
+    :param winlen: the length of the analysis window in seconds. Default is 0.025s (25 milliseconds)
+    :param winstep: the step between successive windows in seconds. Default is 0.01s (10 milliseconds)
+    :param nfilt: the number of filters in the filterbank, default 26.
+    :param nfft: the FFT size. Default is 512.
+    :param lowfreq: lowest band edge of mel filters. In Hz, default is 0.
+    :param highfreq: highest band edge of mel filters. In Hz, default is samplerate/2
+    :param preemph: apply preemphasis filter with preemph as coefficient. 0 is no filter. Default is 0.97.
+    :param winfunc: the analysis window to apply to each frame. By default no window is applied. You can use numpy window functions here e.g. winfunc=numpy.hamming
+    :returns: 2 values. The first is a numpy array of size (NUMFRAMES by nfilt) containing features. Each row holds 1 feature vector. The
+        second return value is the energy in each frame (total energy, unwindowed)
+    """
+    highfreq = highfreq or samplerate / 2
+    signal = sigproc.preemphasis(signal, preemph)
+    frames = sigproc.framesig(signal, winlen * samplerate, winstep * samplerate, winfunc)
+    pspec = sigproc.powspec(frames, nfft)
+    energy = np.sum(pspec, 1)  # this stores the total energy in each frame
+    energy = np.where(energy == 0, np.finfo(float).eps,
+                         energy)  # if energy is zero, we get problems with log
+
+    fb = get_filterbanks(nfilt, nfft, samplerate, lowfreq, highfreq)
+    feat = np.dot(pspec, fb.T)  # compute the filterbank energies
+    feat = np.where(feat == 0, np.finfo(float).eps, feat)  # if feat is zero, we get problems with log
+
+    return feat, energy, fb
+
+
 if __name__ == '__main__':
     """
     Main function
@@ -285,34 +319,45 @@ if __name__ == '__main__':
     fft = {}
 
     # Loop through folds and calculate spectrogram and plot data
-    for c in classes:
-        # Get the file name and the fold it exists in from the dataframe
-        wav_file = df[df.label == c].iloc[0, 0]
-        fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
+    c = 'engine_idling'
+    # Get the file name and the fold it exists in from the dataframe
+    wav_file = df[df.label == c].iloc[0, 0]
+    fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
 
-        # Read signal and add it to dict. UrbanSound uses stereo which is made mono
-        signal, sr = sf.read(f'../Datasets/audio/original/fold{fold}/{wav_file}')
-        # signal = make_signal_mono(signal)
-        # signal = resample_signal(signal, orig_sr=sr, target_sr=16000)
-        # step = signal.shape[0]/sr
-        #
-        # # mask = envelope(right_channel, sr, threshold=0.007)
-        #
-        # rand_index = np.random.randint(0, signal.shape[0] - step)
-        # signal = signal[rand_index:rand_index + step]
-        # signal = make_signal_mono(signal)
-        # signal_hat = resample_signal(signal, orig_sr=sr, target_sr=5000)
+    # Read signal and add it to dict. UrbanSound uses stereo which is made mono
+    signal, sr = sf.read(f'../Datasets/audio/original/fold{fold}/{wav_file}')
+    signal = make_signal_mono(signal)
+    signal = resample_signal(signal, orig_sr=sr, target_sr=16000)
+    # step = signal.shape[0]/sr
+    #
+    # # mask = envelope(right_channel, sr, threshold=0.007)
+    #
+    # rand_index = np.random.randint(0, signal.shape[0] - step)
+    # signal = signal[rand_index:rand_index + step]
+    # signal = make_signal_mono(signal)
+    # signal_hat = resample_signal(signal, orig_sr=sr, target_sr=5000)
 
-        signals[c], fft[c], filterbank[c], mfccs[c] = extract_features(signal, sr,
-                                                                       clean=False,
-                                                                       fft=True,
-                                                                       filterbank=True,
-                                                                       mffc=True,
-                                                                       dynamic_threshold=False)
-        # f_bank[c] = fbank(signal, sr, nfilt=26, nfft=512, winlen=0.025, winstep=0.01)[0].T
-        plt.title(c)
-        plt.imshow(mfccs[c], cmap='hot', interpolation='nearest')
-        plt.show()
+    signals[c], fft[c], filterbank[c], mfccs[c] = extract_features(signal, sr,
+                                                                   clean=False,
+                                                                   fft=True,
+                                                                   filterbank=True,
+                                                                   mffc=True,
+                                                                   dynamic_threshold=False)
+    # f_bank[c] = fbank(signal, sr, nfilt=26, nfft=512, winlen=0.025, winstep=0.01)[2].T
+
+
+
+    plt.title(c)
+    plt.imshow(filterbank[c], cmap='hot', interpolation='nearest')
+    plt.show()
+    plt.title(c)
+    plt.imshow(mfccs[c], cmap='hot', interpolation='nearest')
+    plt.show()
+    exit()
+    print('start plotting')
+    plt.title('Drilling')
+    plt.plot(fft['dog_bark'][1], fft['dog_bark'][0])
+    plt.show()
         # ax = plt.gca()
         # ax.grid(True)
         # plt.title(c)

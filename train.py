@@ -22,6 +22,7 @@ import tensorflow as tf
 from tqdm import tqdm
 from python_speech_features import mfcc, fbank, logfbank
 import soundfile as sf
+import random
 
 # Personal libraries
 import preprocess_data
@@ -30,23 +31,6 @@ import plotting_functions
 # Parse the config.ini file
 config = configparser.ConfigParser()
 config.read("config.ini")
-
-
-def parse_arguments():
-    """
-    Choose what model to use. Either 'conv' for convolutional model
-    or 'time' for a recurrent lstm model.
-    :return:
-    """
-    parser = argparse.ArgumentParser()
-    # Set up arguments
-
-    parser.add_argument('--mode', '-m', type=str,
-                        help='Either conv or time',
-                        default='conv')
-
-    args = parser.parse_args()
-    return args
 
 
 def load_and_extract_features(filepath):
@@ -60,13 +44,6 @@ def load_and_extract_features(filepath):
     return features['x'], features['y']
 
 
-def find_class_distribution():
-    """
-    Finds the class distribution to use when sampling features
-    :return:
-    """
-
-
 class TrainAudioClassificator:
     """
     Class object for training a model to classify acoustic sounds
@@ -76,7 +53,7 @@ class TrainAudioClassificator:
         Initialize variables
         """
         # DataFrame
-        self.df = df.loc[df['length'] > 3.5]
+        self.df = df.loc[df['length'] >= 3.5]
         self.df = self.df.reset_index()
 
         # Find classes and create class distribution
@@ -92,10 +69,6 @@ class TrainAudioClassificator:
                         # 'gun_shot',
                         # 'car_horn'
                         ]
-        # self.classes = list(np.unique(df['label']))
-        self.class_dist = df.groupby(['label'])['length'].mean()
-        self.prob_dist = self.class_dist / self.class_dist.sum()
-        # plotting_functions.plot_class_distribution(self.class_dist, self.classes)
 
         # Audio parameters
         self.network_type = config['model']['net']
@@ -114,9 +87,27 @@ class TrainAudioClassificator:
         self.n_samples = config['preprocessing'].getint('n_samples')
 
         # Training parameters
+        self.n_training_samples = self.find_samples_per_epoch((1, 9))
+        self.n_validation_samples = self.find_samples_per_epoch((9, 10))
+        self.n_testing_samples = self.find_samples_per_epoch((10, 11))
+
+        self.class_dist = [self.n_training_samples[classes]/sum(self.n_training_samples.values())
+                           for classes in self.classes]
+        self.prob_dist = pd.Series(self.class_dist, self.classes)
+
+
+        # THIS prob_dist is based on length whie the above is based on samples
+        # print(self.prob_dist)
+        # self.class_dist = df.groupby(['label'])['length'].mean()
+        # # print(self.class_dist)
+        #
+        # self.prob_dist = self.class_dist / self.class_dist.sum()
+        # print(self.prob_dist)
+        # exit()
         self.epochs = config['model'].getint('epochs')
         self.batch_size = config['model'].getint('batch_size')
         self.learning_rate = config['model'].getfloat('learning_rate')
+
         self.fold = config['model'].getint('fold')
         self.steps_per_epoch = config['model'].getint('steps_per_epoch')
         self.use_generator = config['model'].getboolean('use_generator')
@@ -142,21 +133,25 @@ class TrainAudioClassificator:
         self.callbacks_list = None
         self.validation_fold = None
 
-    def select_random_audio_clip(self, sample):
+    def select_random_audio_clip(self, sample, seed=None):
         """
         Selects a part of the audio file at random. length of clip is defined by self.step
         :return:
         """
-
-        rand_index = np.random.randint(0, sample.shape[0] - self.step)
+        if seed is not None:
+            rand_index = np.random.randint(0, sample.shape[0] - self.step)
+        else:
+            np.random.seed(seed)
+            rand_index = np.random.randint(0, sample.shape[0] - self.step)
         return sample[rand_index:rand_index + self.step]
 
-    def build_feature_from_signal(self, file_path, feature_to_extract='mfcc', activate_threshold=False):
+    def build_feature_from_signal(self, file_path, feature_to_extract='mfcc', activate_threshold=False, seed=None):
         """
         Reads the signal from the file path. Then build mffc features that is returned.
         If the signal is stereo, the signal will be split up and only the first channel is used.
 
         Later implementations should consist of using both channels, and being able to select other features than mfccs
+        :param seed: None by default
         :param feature_to_extract: Choose what feature to extract. Current alternatives: 'mffc', 'fbank' and 'logfbank'
         :param file_path: File path to audio file
         :param activate_threshold: A lower boundary to filter out weak signals
@@ -168,7 +163,7 @@ class TrainAudioClassificator:
 
         # Choose a window of the signal to use for the sample
         try:
-            sample = self.select_random_audio_clip(sample)
+            sample = self.select_random_audio_clip(sample, seed)
 
         except ValueError:
             print("audio file to small. Skip and move to next")
@@ -202,12 +197,34 @@ class TrainAudioClassificator:
             raise ValueError('Please choose an existing feature in the config.ini file: mfcc, logfbank or fbank')
         return sample_hat
 
+    def find_samples_per_epoch(self, folds=(1, 9)):
+        """
+        Finds out the number of possible samples based on the step length
+        :param folds: folds to checl
+        :return:
+        """
+        samples_dict = {}
+        for fold in range(folds[0], folds[1]):
+            # Find all the files in the fold
+            files_in_fold = self.df[self.df.fold == fold]
+
+            for classes in self.classes:
+                # Find all the matches of that class in the fold
+                files_with_class = files_in_fold[self.df.label == classes]
+
+                # Add up the samples
+                if classes in samples_dict.keys():
+                    samples_dict[classes] += int(files_with_class['length'].sum()/0.5)
+                else:
+                    samples_dict[classes] = int(files_with_class['length'].sum()/0.5)
+        return samples_dict
+
     def preprocess_dataset_generator(self, mode='training'):
         """
-        Builds and shapes the data according to the mode chosen.
-
-        :param mode: Whether to create a batch for training or for validation. This is because it is important
-                     to separate what fold you use for which.
+        Pre-processes a batch of data which is yielded for every function call. Size is defined by batch size
+        is defined the config.ini file. If mode = 'training', the first call will make a batch from the first
+        available fold of the training folds. Next call will be from the next available fold. When the end
+        is reached it will start from the first fold again.
         :return:
         """
 
@@ -225,15 +242,18 @@ class TrainAudioClassificator:
         # Choose fold to start from
         if mode == 'training':
             fold = 1
+            seed = None
         elif mode == 'validation':
             fold = validation_folds
+            seed = None
         elif mode == 'testing':
             fold = testing_folds
+            seed = None
 
         # Build feature samples
         while True:
             x, y = [], []  # Set up lists
-            files_in_fold = self.df.loc[self.df.fold == fold]  # Get the filenames that exists in that fold
+            files_in_fold = self.df.loc[self.df.fold == fold]
             # Loop through the files in the fold and create a batch
             for n in range(self.batch_size):
 
@@ -245,7 +265,8 @@ class TrainAudioClassificator:
                 # Extract feature from signal
                 x_sample = self.build_feature_from_signal(file_path,
                                                           feature_to_extract=self.feature,
-                                                          activate_threshold=self.activate_threshold)
+                                                          activate_threshold=self.activate_threshold,
+                                                          seed=seed)
 
                 # If the flag is set, it means it could not process current file and it moves to next.
                 if x_sample == 'move to next file':
@@ -303,14 +324,15 @@ class TrainAudioClassificator:
             files_in_fold = self.df.loc[self.df.fold == fold]  # Get the filenames that exists in that fold
 
             # samples_per_fold = 2 * int(files_in_fold['length'].sum() / 0.1)  # the number of samples for each fold
-            samples_per_fold = self.n_samples
+            samples_per_fold = sum(self.find_samples_per_epoch((fold, fold+1)).values())
+            print(samples_per_fold)
 
             # Loop through the files in the fold
             for _ in tqdm(range(samples_per_fold)):
 
                 # Pick a random class from the probability distribution and then a random file with that class
-                # rand_class = np.random.choice(self.classes, p=self.prob_dist)
-                rand_class = np.random.choice(self.classes)
+                rand_class = np.random.choice(self.classes, p=self.prob_dist)
+                # rand_class = np.random.choice(self.classes)
                 file = np.random.choice(files_in_fold[self.df.label == rand_class].slice_file_name)
                 file_path = f'../Datasets/audio/lengthy_audio/fold{fold}/{file}'
 
@@ -351,10 +373,7 @@ class TrainAudioClassificator:
         :return:
         """
         y_flat = np.argmax(y_train, axis=1)  # Reshape one-hot encode matrix back to string labels
-        if self.use_generator is True:
-            return compute_class_weight('balanced', np.unique(y_flat), y_flat)
-        else:
-            self.class_weight = compute_class_weight('balanced', np.unique(y_flat), y_flat)
+        self.class_weight = compute_class_weight('balanced', np.unique(y_flat), y_flat)
 
     def set_up_model(self, x, y):
         """
@@ -393,55 +412,57 @@ class TrainAudioClassificator:
         """
         model = Sequential()
 
-        # Upsampling
-        model.add(Conv2DTranspose(32, (1, 1), strides=(2, 2),
-                                  padding='same',
-                                  activation='relu',
-                                  # activation=tf.nn.leaky_relu,
-                                  input_shape=input_shape))
+        model.add(Conv2D(32, (1, 1), strides=(1, 1),
+                         activation='relu',
+                         # activation=tf.nn.leaky_relu,
+                         padding='same',
+                         input_shape=input_shape
+                         ))
 
-        model.add(Dropout(0.1))
+        model.add(Dropout(0.2))
         model.add(BatchNormalization())
 
         # VGG - 1 - Conv
-        model.add(Conv2D(256, (1, 1),
+        model.add(Conv2D(64, (1, 1), strides=(1, 1),
                          activation='relu',
                          # activation=tf.nn.leaky_relu,
-                         strides=(1, 1),
                          padding='same'))
-        model.add(Dropout(0.1))
+
+        model.add(Dropout(0.2))
         model.add(BatchNormalization())
 
         # VGG - 2 - Conv
-        model.add(Conv2D(128, (1, 1),
+        model.add(Conv2D(128, (1, 1), strides=(1, 1),
                          activation='relu',
                          # activation=tf.nn.leaky_relu,
-                         strides=(1, 1),
                          padding='same', ))
-        model.add(Dropout(0.1))
+
+        model.add(Dropout(0.2))
         model.add(BatchNormalization())
 
         # VGG - 3 - Conv
-        model.add(Conv2D(64, (2, 2),
+        model.add(Conv2D(256, (1, 1), strides=(1, 1),
                          activation='relu',
                          # activation=tf.nn.leaky_relu,
-                         strides=(2, 2),
                          padding='same', ))
-        model.add(Dropout(0.1))
+
+        model.add(Dropout(0.2))
         model.add(BatchNormalization())
 
         # VGG - 3 - Conv
-        model.add(Conv2D(32, (2, 2),
+        model.add(Conv2D(32, (1, 1), strides=(1, 1),
                          activation='relu',
                          # activation=tf.nn.leaky_relu,
-                         strides=(2, 2),
                          padding='same', ))
-        model.add(Dropout(0.1))
+
+        model.add(Dropout(0.2))
         model.add(BatchNormalization())
+
+        model.add(MaxPool2D(2, 2))
 
         # VGG - 4 - FCC
         model.add(Flatten())
-        model.add(Dense(64, activation='relu'))
+        model.add(Dense(128, activation='relu'))
         model.add(Dense(64, activation='relu'))
 
         # VGG - 5 Output
@@ -457,7 +478,7 @@ class TrainAudioClassificator:
 
     def train(self, x_train, y_train, x_val, y_val):
         """
-        Method used for training a model.
+        Trains the model on data and validates after every epoch.
         :param x_train:
         :param y_train:
         :param x_val:
@@ -465,7 +486,8 @@ class TrainAudioClassificator:
         :return:
         """
         # keras.Sequential.fit_generator()
-        # Train the network
+
+        # Train pre-made features
         if self.use_generator is False:
             self.model.fit(x_train, y_train,
                            epochs=self.epochs,
@@ -475,13 +497,15 @@ class TrainAudioClassificator:
                            class_weight=self.class_weight,
                            validation_data=(x_val, y_val)
                            )
+
+        # Train on generated data batch-by-batch. Better for memory
         else:
             self.model.fit_generator(self.preprocess_dataset_generator(mode='training'),
-                                     steps_per_epoch=int(8000/self.batch_size),
+                                     steps_per_epoch=int(sum(self.n_training_samples.values())/self.batch_size),
                                      epochs=20, verbose=1,
                                      callbacks=self.callbacks_list,
                                      validation_data=self.preprocess_dataset_generator(mode='validation'),
-                                     validation_steps=15,
+                                     validation_steps=int(sum(self.n_validation_samples.values())/self.batch_size),
                                      class_weight=None, max_queue_size=2,
                                      # workers=2, use_multiprocessing=True,
                                      shuffle=True, initial_epoch=0)
@@ -495,6 +519,11 @@ class TrainAudioClassificator:
         """
         y_pred = []
         y_true = []
+        # TODO: Implement test generator.
+        # prediction = self.model.predict_generator(self.preprocess_dataset_generator(mode='testing'),
+        #                                           steps=15,
+        #                                           )
+        # Sequential.predict_generator()
 
         # Loop through validation set
         for sample, label in tqdm(zip(x_test, y_test)):
@@ -514,20 +543,6 @@ class TrainAudioClassificator:
         print(self.classes)
         print(matrix)
         print(accuracy)
-
-    def choose_classes(self):
-        """
-        In the config file, pick what classes to train on and to test on. This method exist so
-        the user can choose to only train on a few classes without having to create a whole new data set.
-        :return:
-        """
-        # classes_idx = []
-        # classes_to_use = ['air_conditioner', 'engine_idling', 'jackhammer']
-        # for c in classes_to_use:
-        #     classes_idx.append(self.classes.index(c))
-        #
-        # s = np.array(self.y)
-        # print(s)
 
     def separate_loaded_data(self, nr_rolls=0):
         """
@@ -643,6 +658,7 @@ def main():
         6. When this pipeline is finished, work with the experimentation!
 
     """
+
     # Read csv for UrbanSounds
     df = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_length_NewTest.csv')
 
