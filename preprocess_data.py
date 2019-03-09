@@ -219,9 +219,9 @@ def extract_features(signal, rate, clean=False, fft=False, filterbank=False, mff
     if fft is True:
         fft = calc_fft(signal, rate)
         list_of_returns.append(fft)
+
     # Find filter bank coefficients
     if filterbank is True:
-        # bank = logfbank(signal, rate, nfilt=26, nfft=1200).T
         bank = logfbank(signal, rate, nfilt=35, nfft=1200).T
         list_of_returns.append(bank)
 

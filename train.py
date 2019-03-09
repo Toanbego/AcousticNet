@@ -27,6 +27,7 @@ import random
 # Personal libraries
 import preprocess_data
 import plotting_functions
+import train_val_tensorboard
 
 # Parse the config.ini file
 config = configparser.ConfigParser()
@@ -81,7 +82,8 @@ class TrainAudioClassificator:
         self.n_feat = config['preprocessing'].getint('n_feat')
         self.n_fft = config['preprocessing'].getint('n_fft')
         self.rate = config['preprocessing'].getint('rate')
-        self.step = int(self.rate * config['preprocessing'].getfloat('step_size'))
+        self.step_length = config['preprocessing'].getfloat('step_size')
+        self.sample_length = int(self.rate * self.step_length)
         self.activate_threshold = config['preprocessing'].getboolean('activate_threshold')
         self.threshold = config['preprocessing'].getfloat('threshold')
         self.n_samples = config['preprocessing'].getint('n_samples')
@@ -90,24 +92,12 @@ class TrainAudioClassificator:
         self.n_training_samples = self.find_samples_per_epoch((1, 9))
         self.n_validation_samples = self.find_samples_per_epoch((9, 10))
         self.n_testing_samples = self.find_samples_per_epoch((10, 11))
-
         self.class_dist = [self.n_training_samples[classes]/sum(self.n_training_samples.values())
                            for classes in self.classes]
         self.prob_dist = pd.Series(self.class_dist, self.classes)
-
-
-        # THIS prob_dist is based on length whie the above is based on samples
-        # print(self.prob_dist)
-        # self.class_dist = df.groupby(['label'])['length'].mean()
-        # # print(self.class_dist)
-        #
-        # self.prob_dist = self.class_dist / self.class_dist.sum()
-        # print(self.prob_dist)
-        # exit()
         self.epochs = config['model'].getint('epochs')
         self.batch_size = config['model'].getint('batch_size')
         self.learning_rate = config['model'].getfloat('learning_rate')
-
         self.fold = config['model'].getint('fold')
         self.steps_per_epoch = config['model'].getint('steps_per_epoch')
         self.use_generator = config['model'].getboolean('use_generator')
@@ -139,13 +129,13 @@ class TrainAudioClassificator:
         :return:
         """
         if seed is not None:
-            rand_index = np.random.randint(0, sample.shape[0] - self.step)
+            rand_index = np.random.randint(0, sample.shape[0] - self.sample_length)
         else:
             np.random.seed(seed)
-            rand_index = np.random.randint(0, sample.shape[0] - self.step)
-        return sample[rand_index:rand_index + self.step]
+            rand_index = np.random.randint(0, sample.shape[0] - self.sample_length)
+        return sample[rand_index:rand_index + self.sample_length]
 
-    def build_feature_from_signal(self, file_path, feature_to_extract='mfcc', activate_threshold=False, seed=None):
+    def build_feature_from_signal(self, sample, rate, feature_to_extract='mfcc', activate_threshold=False, seed=None):
         """
         Reads the signal from the file path. Then build mffc features that is returned.
         If the signal is stereo, the signal will be split up and only the first channel is used.
@@ -157,17 +147,17 @@ class TrainAudioClassificator:
         :param activate_threshold: A lower boundary to filter out weak signals
         :return:
         """
-        # Read file
-        sample, rate = sf.read(file_path)
-        sample = preprocess_data.make_signal_mono(sample)
-
-        # Choose a window of the signal to use for the sample
-        try:
-            sample = self.select_random_audio_clip(sample, seed)
-
-        except ValueError:
-            print("audio file to small. Skip and move to next")
-            return 'move to next file'
+        # # Read file
+        # sample, rate = sf.read(file_path)
+        # sample = preprocess_data.make_signal_mono(sample)
+        #
+        # # Choose a window of the signal to use for the sample
+        # try:
+        #     sample = self.select_random_audio_clip(sample, seed)
+        #
+        # except ValueError:
+        #     print("audio file to small. Skip and move to next")
+        #     return 'move to next file'
 
         # Perform filtering with a threshold on the time signal
         if activate_threshold is True:
@@ -314,43 +304,46 @@ class TrainAudioClassificator:
         """
         fold_list_x = []
         fold_list_y = []
+        files_with_label = {}
+
         _min, _max = float('inf'), -float('inf')    # Initialize min and max for x
         folds = list(np.unique(self.df['fold']))    # The folds to loop through
         self.df = self.df.reset_index()
+
         # Build feature samples
         for idx,  fold in enumerate(folds):
             x, y = [], []  # Set up lists
             print(f'\nExtracting data from fold{fold}')
-            files_in_fold = self.df.loc[self.df.fold == fold]  # Get the filenames that exists in that fold
 
-            # samples_per_fold = 2 * int(files_in_fold['length'].sum() / 0.1)  # the number of samples for each fold
-            samples_per_fold = sum(self.find_samples_per_epoch((fold, fold+1)).values())
-            print(samples_per_fold)
+            # Get the filenames that exists in that fold
+            files_in_fold = self.df.loc[self.df.fold == fold]
+            for classes in self.classes:
+                files_with_label[classes] = files_in_fold[self.df.label == classes].slice_file_name
 
-            # Loop through the files in the fold
-            for _ in tqdm(range(samples_per_fold)):
+                # Loop through the files in the fold
+                for file in tqdm(files_with_label[classes]):
 
-                # Pick a random class from the probability distribution and then a random file with that class
-                rand_class = np.random.choice(self.classes, p=self.prob_dist)
-                # rand_class = np.random.choice(self.classes)
-                file = np.random.choice(files_in_fold[self.df.label == rand_class].slice_file_name)
-                file_path = f'../Datasets/audio/lengthy_audio/fold{fold}/{file}'
+                    # Read file
+                    file_path = f'../Datasets/audio/lengthy_audio/fold{fold}/{file}'
+                    sample, rate = sf.read(file_path)                                   # Read the file
+                    sample = preprocess_data.make_signal_mono(sample)                   # Make signal mono
+                    length = float(self.df[self.df.slice_file_name == file].length)     # Find length of signal
+                    samples_from_signal = int(length / self.step_length)                 # Possible samples to get
 
-                # Extract feature from signal
-                x_sample = self.build_feature_from_signal(file_path,
-                                                          feature_to_extract=self.feature,
-                                                          activate_threshold=self.activate_threshold)
+                    # Loop through the signal
+                    for i in range(samples_from_signal):
+                        sample_length = self.step_length * rate
+                        # Extract feature from signal
+                        x_sample = self.build_feature_from_signal(sample[int(sample_length*i):int(sample_length*(i+1))],
+                                                                  rate,
+                                                                  feature_to_extract=self.feature,
+                                                                  activate_threshold=self.activate_threshold)
 
-                # If the flag is set, it means it could not process current file and it moves to next.
-                if x_sample == 'move to next file':
-                    print(rand_class)
-                    continue
-
-                # Update min and max
-                _min = min(np.amin(x_sample), _min)
-                _max = max(np.amax(x_sample), _max)
-                x.append(x_sample)
-                y.append(self.classes.index(rand_class))
+                        # Update min and max
+                        _min = min(np.amin(x_sample), _min)
+                        _max = max(np.amax(x_sample), _max)
+                        x.append(x_sample)
+                        y.append(self.classes.index(classes))
 
             # Normalize X and y and reshape the features
             y = np.array(y)
@@ -412,7 +405,7 @@ class TrainAudioClassificator:
         """
         model = Sequential()
 
-        model.add(Conv2D(32, (1, 1), strides=(1, 1),
+        model.add(Conv2D(64, (1, 1), strides=(1, 1),
                          activation='relu',
                          # activation=tf.nn.leaky_relu,
                          padding='same',
@@ -422,32 +415,14 @@ class TrainAudioClassificator:
         model.add(Dropout(0.2))
         model.add(BatchNormalization())
 
-        # VGG - 1 - Conv
-        model.add(Conv2D(64, (1, 1), strides=(1, 1),
-                         activation='relu',
-                         # activation=tf.nn.leaky_relu,
-                         padding='same'))
-
-        model.add(Dropout(0.2))
-        model.add(BatchNormalization())
-
-        # VGG - 2 - Conv
-        model.add(Conv2D(128, (1, 1), strides=(1, 1),
-                         activation='relu',
-                         # activation=tf.nn.leaky_relu,
-                         padding='same', ))
-
-        model.add(Dropout(0.2))
-        model.add(BatchNormalization())
-
-        # VGG - 3 - Conv
-        model.add(Conv2D(256, (1, 1), strides=(1, 1),
-                         activation='relu',
-                         # activation=tf.nn.leaky_relu,
-                         padding='same', ))
-
-        model.add(Dropout(0.2))
-        model.add(BatchNormalization())
+        # # VGG - 1 - Conv
+        # model.add(Conv2D(64, (1, 1), strides=(1, 1),
+        #                  activation='relu',
+        #                  # activation=tf.nn.leaky_relu,
+        #                  padding='same'))
+        #
+        # model.add(Dropout(0.4))
+        # model.add(BatchNormalization())
 
         # VGG - 3 - Conv
         model.add(Conv2D(32, (1, 1), strides=(1, 1),
@@ -455,15 +430,24 @@ class TrainAudioClassificator:
                          # activation=tf.nn.leaky_relu,
                          padding='same', ))
 
-        model.add(Dropout(0.2))
+        model.add(Dropout(0.4))
         model.add(BatchNormalization())
+
+        # model.add(Conv2D(128, (1, 1), strides=(1, 1),
+        #                  activation='relu',
+        #                  # activation=tf.nn.leaky_relu,
+        #                  padding='same', ))
+        #
+        # model.add(Dropout(0.4))
+        # model.add(BatchNormalization())
 
         model.add(MaxPool2D(2, 2))
 
         # VGG - 4 - FCC
         model.add(Flatten())
-        model.add(Dense(128, activation='relu'))
-        model.add(Dense(64, activation='relu'))
+        model.add(Dense(32, activation='relu'))
+        # model.add(Dense(256, activation='relu'))
+        # model.add(Dense(256, activation='relu'))
 
         # VGG - 5 Output
         model.add(Dense(num_classes, activation='softmax'))
@@ -487,7 +471,7 @@ class TrainAudioClassificator:
         """
         # keras.Sequential.fit_generator()
 
-        # Train pre-made features
+        # Train on pre-made features
         if self.use_generator is False:
             self.model.fit(x_train, y_train,
                            epochs=self.epochs,
