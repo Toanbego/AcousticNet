@@ -1,7 +1,6 @@
 
 # Standard libraries
 import configparser
-import argparse
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -9,25 +8,20 @@ import keras
 # ML libraries
 from sklearn.metrics import confusion_matrix
 from keras.models import load_model
-from keras.layers import Conv2D, MaxPool2D, Flatten, BatchNormalization, Conv2DTranspose
-from keras.layers import Dropout, Dense
+from keras.layers import Conv2D, MaxPool2D, Flatten, BatchNormalization
+from keras.layers import Dropout, Dense, LeakyReLU
 from keras.models import Sequential
-from keras.utils import to_categorical
+from keras.regularizers import l1, l2
 from keras.callbacks import ModelCheckpoint, TensorBoard
 from sklearn.utils.class_weight import compute_class_weight
 import keras.optimizers
-import tensorflow as tf
 
 # Miscellaneous
 from tqdm import tqdm
-from python_speech_features import mfcc, fbank, logfbank
-import soundfile as sf
-import random
 
 # Personal libraries
-import preprocess_data
-import plotting_functions
-import train_val_tensorboard
+from preprocess_data import PreprocessData
+
 
 # Parse the config.ini file
 config = configparser.ConfigParser()
@@ -45,7 +39,7 @@ def load_and_extract_features(filepath):
     return features['x'], features['y']
 
 
-class TrainAudioClassificator:
+class TrainAudioClassificator(PreprocessData):
     """
     Class object for training a model to classify acoustic sounds
     """
@@ -53,48 +47,12 @@ class TrainAudioClassificator:
         """
         Initialize variables
         """
-        # DataFrame
-        self.df = df.loc[df['length'] >= 3.5]
-        self.df = self.df.reset_index()
-
-        # Find classes and create class distribution
-        self.classes = [
-                        # 'children_playing',
-                        'air_conditioner',
-                        'engine_idling',
-                        # 'siren',
-                        # 'street_music',
-                        # 'drilling',
-                        # 'jackhammer',
-                        # 'dog_bark',
-                        # 'gun_shot',
-                        # 'car_horn'
-                        ]
+        PreprocessData.__init__(self, df)
 
         # Audio parameters
-        self.network_type = config['model']['net']
-        self.load_file = config['preprocessing']['load_file']
-        self.save_file = config['preprocessing']['save_file']
-        self.audio_folder = config['preprocessing']['audio_folder']
-        self.randomize_rolls = config['preprocessing'].getboolean('randomize_roll')
-        self.feature = config['preprocessing']['feature']
-        self.n_filt = config['preprocessing'].getint('n_filt')
-        self.n_feat = config['preprocessing'].getint('n_feat')
-        self.n_fft = config['preprocessing'].getint('n_fft')
-        self.rate = config['preprocessing'].getint('rate')
-        self.step_length = config['preprocessing'].getfloat('step_size')
-        self.sample_length = int(self.rate * self.step_length)
-        self.activate_threshold = config['preprocessing'].getboolean('activate_threshold')
-        self.threshold = config['preprocessing'].getfloat('threshold')
-        self.n_samples = config['preprocessing'].getint('n_samples')
-
-        # Training parameters
-        self.n_training_samples = self.find_samples_per_epoch((1, 9))
-        self.n_validation_samples = self.find_samples_per_epoch((9, 10))
-        self.n_testing_samples = self.find_samples_per_epoch((10, 11))
-        self.class_dist = [self.n_training_samples[classes]/sum(self.n_training_samples.values())
-                           for classes in self.classes]
-        self.prob_dist = pd.Series(self.class_dist, self.classes)
+        self.load_feature = config['model']['load_features']
+        self.randomize_rolls = config['model'].getboolean('randomize_roll')
+        self.fold = config['model'].getint('fold')
         self.epochs = config['model'].getint('epochs')
         self.batch_size = config['model'].getint('batch_size')
         self.learning_rate = config['model'].getfloat('learning_rate')
@@ -123,242 +81,6 @@ class TrainAudioClassificator:
         self.callbacks_list = None
         self.validation_fold = None
 
-    def select_random_audio_clip(self, sample, seed=None):
-        """
-        Selects a part of the audio file at random. length of clip is defined by self.step
-        :return:
-        """
-        if seed is not None:
-            rand_index = np.random.randint(0, sample.shape[0] - self.sample_length)
-        else:
-            np.random.seed(seed)
-            rand_index = np.random.randint(0, sample.shape[0] - self.sample_length)
-        return sample[rand_index:rand_index + self.sample_length]
-
-    def build_feature_from_signal(self, sample, rate, feature_to_extract='mfcc', activate_threshold=False, seed=None):
-        """
-        Reads the signal from the file path. Then build mffc features that is returned.
-        If the signal is stereo, the signal will be split up and only the first channel is used.
-
-        Later implementations should consist of using both channels, and being able to select other features than mfccs
-        :param seed: None by default
-        :param feature_to_extract: Choose what feature to extract. Current alternatives: 'mffc', 'fbank' and 'logfbank'
-        :param file_path: File path to audio file
-        :param activate_threshold: A lower boundary to filter out weak signals
-        :return:
-        """
-        # # Read file
-        # sample, rate = sf.read(file_path)
-        # sample = preprocess_data.make_signal_mono(sample)
-        #
-        # # Choose a window of the signal to use for the sample
-        # try:
-        #     sample = self.select_random_audio_clip(sample, seed)
-        #
-        # except ValueError:
-        #     print("audio file to small. Skip and move to next")
-        #     return 'move to next file'
-
-        # Perform filtering with a threshold on the time signal
-        if activate_threshold is True:
-            mask = preprocess_data.envelope(sample, rate, self.threshold)
-            sample = sample[mask]
-
-        # Extracts the mel frequency cepstrum coefficients
-        if feature_to_extract == 'mfcc':
-            sample_hat = mfcc(sample, rate,
-                              numcep=self.n_feat,
-                              nfilt=self.n_filt,
-                              nfft=self.n_fft).T
-
-        # Extract the log mel frequency filter banks
-        elif feature_to_extract == 'logfbank':
-            sample_hat = logfbank(sample, rate,
-                                  nfilt=self.n_filt,
-                                  nfft=self.n_fft).T
-
-        # Extract the mel frequency filter banks
-        elif feature_to_extract == 'fbank':
-            sample_hat = fbank(sample, rate,
-                               nfilt=self.n_filt,
-                               nfft=self.n_fft)[0].T
-
-        else:
-            raise ValueError('Please choose an existing feature in the config.ini file: mfcc, logfbank or fbank')
-        return sample_hat
-
-    def find_samples_per_epoch(self, folds=(1, 9)):
-        """
-        Finds out the number of possible samples based on the step length
-        :param folds: folds to checl
-        :return:
-        """
-        samples_dict = {}
-        for fold in range(folds[0], folds[1]):
-            # Find all the files in the fold
-            files_in_fold = self.df[self.df.fold == fold]
-
-            for classes in self.classes:
-                # Find all the matches of that class in the fold
-                files_with_class = files_in_fold[self.df.label == classes]
-
-                # Add up the samples
-                if classes in samples_dict.keys():
-                    samples_dict[classes] += int(files_with_class['length'].sum()/0.5)
-                else:
-                    samples_dict[classes] = int(files_with_class['length'].sum()/0.5)
-        return samples_dict
-
-    def preprocess_dataset_generator(self, mode='training'):
-        """
-        Pre-processes a batch of data which is yielded for every function call. Size is defined by batch size
-        is defined the config.ini file. If mode = 'training', the first call will make a batch from the first
-        available fold of the training folds. Next call will be from the next available fold. When the end
-        is reached it will start from the first fold again.
-        :return:
-        """
-
-        _min, _max = float('inf'), -float('inf')    # Initialize min and max for x
-        folds = np.unique(self.df['fold'])    # The folds to loop through
-
-        # Separate folds into training, validation and split
-        folds = np.roll(folds, folds[-1] - self.fold)
-        training_folds = folds[:-2]
-        validation_folds = folds[-2]
-        testing_folds = folds[-1]
-
-        self.validation_fold = self.fold
-
-        # Choose fold to start from
-        if mode == 'training':
-            fold = 1
-            seed = None
-        elif mode == 'validation':
-            fold = validation_folds
-            seed = None
-        elif mode == 'testing':
-            fold = testing_folds
-            seed = None
-
-        # Build feature samples
-        while True:
-            x, y = [], []  # Set up lists
-            files_in_fold = self.df.loc[self.df.fold == fold]
-            # Loop through the files in the fold and create a batch
-            for n in range(self.batch_size):
-
-                # Pick a random class from the probability distribution and then a random file with that class
-                rand_class = np.random.choice(self.classes)
-                file = np.random.choice(files_in_fold[self.df.label == rand_class].slice_file_name)
-                file_path = f'../Datasets/audio/lengthy_audio/fold{fold}/{file}'
-
-                # Extract feature from signal
-                x_sample = self.build_feature_from_signal(file_path,
-                                                          feature_to_extract=self.feature,
-                                                          activate_threshold=self.activate_threshold,
-                                                          seed=seed)
-
-                # If the flag is set, it means it could not process current file and it moves to next.
-                if x_sample == 'move to next file':
-                    print(rand_class)
-                    continue
-
-                # Update min and max values
-                _min = min(np.amin(x_sample), _min)
-                _max = max(np.amax(x_sample), _max)
-
-                # Create batch set with corresponding labels
-                x.append(x_sample)
-                y.append(self.classes.index(rand_class))
-
-                n += 1
-
-            # Normalize X and y and reshape the features
-            y = np.array(y)
-            x = np.array(x)
-            x = (x - _min) / (_max - _min)                          # Normalize x and y
-            x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 1)    # Reshape all to same size
-
-            # One-hot encode the labels and append to fold
-            y = to_categorical(y, num_classes=len(self.classes))    # One hot encoding
-
-            # Reset fold number when reaching the end
-            if mode == 'training':
-                fold += 1
-                if fold == len(training_folds):
-                    fold = 1
-
-            # Return data and labels
-            yield x, y
-
-    def preprocess_dataset(self):
-        """
-        Builds and shapes the data according to the mode chosen.
-
-        UrbanSounds homepage encourages not to shuffle the data, and mix the folds together.
-        The sample is converted to a spectrogram and appended into an list of X and Y
-        and is to be used as features to train the model.
-        A normal sample length could be 1/10th of a second, but one could
-        always try more or less.
-        :return:
-        """
-        fold_list_x = []
-        fold_list_y = []
-        files_with_label = {}
-
-        _min, _max = float('inf'), -float('inf')    # Initialize min and max for x
-        folds = list(np.unique(self.df['fold']))    # The folds to loop through
-        self.df = self.df.reset_index()
-
-        # Build feature samples
-        for idx,  fold in enumerate(folds):
-            x, y = [], []  # Set up lists
-            print(f'\nExtracting data from fold{fold}')
-
-            # Get the filenames that exists in that fold
-            files_in_fold = self.df.loc[self.df.fold == fold]
-            for classes in self.classes:
-                files_with_label[classes] = files_in_fold[self.df.label == classes].slice_file_name
-
-                # Loop through the files in the fold
-                for file in tqdm(files_with_label[classes]):
-
-                    # Read file
-                    file_path = f'../Datasets/audio/lengthy_audio/fold{fold}/{file}'
-                    sample, rate = sf.read(file_path)                                   # Read the file
-                    sample = preprocess_data.make_signal_mono(sample)                   # Make signal mono
-                    length = float(self.df[self.df.slice_file_name == file].length)     # Find length of signal
-                    samples_from_signal = int(length / self.step_length)                 # Possible samples to get
-
-                    # Loop through the signal
-                    for i in range(samples_from_signal):
-                        sample_length = self.step_length * rate
-                        # Extract feature from signal
-                        x_sample = self.build_feature_from_signal(sample[int(sample_length*i):int(sample_length*(i+1))],
-                                                                  rate,
-                                                                  feature_to_extract=self.feature,
-                                                                  activate_threshold=self.activate_threshold)
-
-                        # Update min and max
-                        _min = min(np.amin(x_sample), _min)
-                        _max = max(np.amax(x_sample), _max)
-                        x.append(x_sample)
-                        y.append(self.classes.index(classes))
-
-            # Normalize X and y and reshape the features
-            y = np.array(y)
-            x = np.array(x)
-            x = (x - _min) / (_max - _min)                          # Normalize x and y
-            x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 1)    # Reshape all to same size
-
-            # One-hot encode the labels and append to fold
-            y = to_categorical(y, num_classes=len(self.classes))    # One hot encoding
-            fold_list_x.append(x)
-            fold_list_y.append(y)
-
-        # Save the features in a .npz file
-        np.savez(self.save_file, x=fold_list_x, y=fold_list_y)
-
     def compute_class_weight(self, y_train):
         """
         Computes the class weight distribution which is is used in the model to compensate for over represented
@@ -376,6 +98,8 @@ class TrainAudioClassificator:
         # Load weights if activated
         if self.load_weights is True or self.network_mode == 'test_network':
             self.model = load_model(self.load_model_path)
+            self.model.summary()
+
 
         # Define input shape and compile model
         else:
@@ -387,8 +111,8 @@ class TrainAudioClassificator:
         tb_callbacks = TensorBoard(log_dir='./logs', histogram_freq=0, batch_size=self.batch_size, write_graph=True,
                                    write_grads=True, write_images=False, embeddings_freq=0,
                                    embeddings_layer_names=None, embeddings_metadata=None, embeddings_data=None,
-                                   update_freq=20000)
-
+                                   update_freq=500)
+        # TODO: check val_loss instead of val_acc
         checkpoint = ModelCheckpoint('weights/weights.{epoch:02d}-{val_acc:.2f}'+f'_{self.feature}_fold{self.validation_fold}.hdf5',
                                      monitor='val_acc',
                                      verbose=1,
@@ -405,49 +129,70 @@ class TrainAudioClassificator:
         """
         model = Sequential()
 
-        model.add(Conv2D(64, (1, 1), strides=(1, 1),
-                         activation='relu',
-                         # activation=tf.nn.leaky_relu,
+        model.add(Conv2D(16, 5, strides=5,
                          padding='same',
+                         kernel_regularizer=l2(0.001),
                          input_shape=input_shape
                          ))
-
-        model.add(Dropout(0.2))
-        model.add(BatchNormalization())
-
-        # # VGG - 1 - Conv
-        # model.add(Conv2D(64, (1, 1), strides=(1, 1),
-        #                  activation='relu',
-        #                  # activation=tf.nn.leaky_relu,
-        #                  padding='same'))
-        #
+        model.add(LeakyReLU())
         # model.add(Dropout(0.4))
         # model.add(BatchNormalization())
+
+
+        # VGG - 1 - Conv
+        model.add(Conv2D(32, 3, strides=3,
+                         kernel_regularizer=l2(0.001),
+                         padding='same'))
+        model.add(LeakyReLU())
+        # model.add(Dropout(0.4))
+        # model.add(BatchNormalization())
+        # model.add(MaxPool2D(2, 2))
 
         # VGG - 3 - Conv
-        model.add(Conv2D(32, (1, 1), strides=(1, 1),
-                         activation='relu',
-                         # activation=tf.nn.leaky_relu,
+        model.add(Conv2D(64, 2, strides=2,
+                         kernel_regularizer=l2(0.001),
                          padding='same', ))
-
-        model.add(Dropout(0.4))
-        model.add(BatchNormalization())
-
-        # model.add(Conv2D(128, (1, 1), strides=(1, 1),
-        #                  activation='relu',
-        #                  # activation=tf.nn.leaky_relu,
-        #                  padding='same', ))
-        #
+        model.add(LeakyReLU())
         # model.add(Dropout(0.4))
         # model.add(BatchNormalization())
 
-        model.add(MaxPool2D(2, 2))
+        # VGG - 4 - Conv
+        model.add(Conv2D(128, (1, 1), strides=(1, 1),
+                         kernel_regularizer=l2(0.001),
+                         padding='same', ))
+        model.add(LeakyReLU())
+        # model.add(Dropout(0.3))
+        # model.add(BatchNormalization())
+        # model.add(MaxPool2D(2, 2))
+
+        # # VGG - 5 - Conv
+        # model.add(Conv2D(256, (1, 1), strides=(1, 1),
+        #                  kernel_regularizer=l2(0.001),
+        #                  padding='same', ))
+        #
+        # model.add(LeakyReLU())
+        # model.add(Dropout(0.3))
+        # model.add(BatchNormalization())
+
+        # # VGG - 6 - Conv
+        # model.add(Conv2D(256, (1, 1), strides=(1, 1),
+        #                  kernel_regularizer=l2(0.001),
+        #                  padding='same', ))
+        #
+        # model.add(LeakyReLU())
+        model.add(Dropout(0.3))
+        # model.add(BatchNormalization())
+        #
+        # model.add(MaxPool2D(2, 2))
 
         # VGG - 4 - FCC
         model.add(Flatten())
-        model.add(Dense(32, activation='relu'))
-        # model.add(Dense(256, activation='relu'))
-        # model.add(Dense(256, activation='relu'))
+        model.add(Dense(64))
+        model.add(LeakyReLU())
+        # model.add(Dense(128))
+        # model.add(LeakyReLU())
+        # model.add(Dense(128))
+        # model.add(LeakyReLU())
 
         # VGG - 5 Output
         model.add(Dense(num_classes, activation='softmax'))
@@ -469,7 +214,7 @@ class TrainAudioClassificator:
         :param y_val:
         :return:
         """
-        # keras.Sequential.fit_generator()
+        # keras.Sequential.fit()
 
         # Train on pre-made features
         if self.use_generator is False:
@@ -480,6 +225,7 @@ class TrainAudioClassificator:
                            callbacks=self.callbacks_list,
                            class_weight=self.class_weight,
                            validation_data=(x_val, y_val)
+
                            )
 
         # Train on generated data batch-by-batch. Better for memory
@@ -490,7 +236,7 @@ class TrainAudioClassificator:
                                      callbacks=self.callbacks_list,
                                      validation_data=self.preprocess_dataset_generator(mode='validation'),
                                      validation_steps=int(sum(self.n_validation_samples.values())/self.batch_size),
-                                     class_weight=None, max_queue_size=2,
+                                     class_weight=None, max_queue_size=1,
                                      # workers=2, use_multiprocessing=True,
                                      shuffle=True, initial_epoch=0)
 
@@ -539,7 +285,7 @@ class TrainAudioClassificator:
         :return: x_train, y_train, x_test, y_test
         """
         # Load the features from a .npz file
-        x, y = load_and_extract_features(self.load_file)
+        x, y = load_and_extract_features(self.load_feature)
 
         # Randomize the roll if set to True
         if self.randomize_rolls is True:
@@ -563,6 +309,12 @@ class TrainAudioClassificator:
         x_test = x[-1]
         y_test = y[-1]
 
+        # # Shuffle training data
+        # np.random.seed(42)
+        # np.random.shuffle(x_train)
+        # np.random.seed(42)
+        # np.random.shuffle(y_train)
+
         # print(np.sum(y_train, axis=0))
 
         return x_train, y_train, x_test, y_test, x_val, y_val
@@ -576,7 +328,10 @@ def run(audio_model):
     """
     # Randomly extract features to create a data set
     if audio_model.network_mode == 'save_features':
-        audio_model.preprocess_dataset()
+        if audio_model.random_extraction is True:
+            audio_model.preprocessing_dataset_randomly()
+        else:
+            audio_model.preprocess_dataset()
 
     # Train a network
     elif audio_model.network_mode == 'train_network':
@@ -597,6 +352,7 @@ def run(audio_model):
 
         # 2. Or use generator for each batch. This option is more memory friendly
         else:
+            # TODO: FIX THIS SHAIT TOMORROW
             x_train, y_train = next(audio_model.preprocess_dataset_generator(mode='training'))
 
             # Compile model
