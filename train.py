@@ -4,7 +4,6 @@ import configparser
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
-import keras
 # ML libraries
 from sklearn.metrics import confusion_matrix
 from keras.models import load_model
@@ -21,7 +20,7 @@ from tqdm import tqdm
 
 # Personal libraries
 from preprocess_data import PreprocessData
-
+import models.ConvModels as CNN
 
 # Parse the config.ini file
 config = configparser.ConfigParser()
@@ -100,12 +99,11 @@ class TrainAudioClassificator(PreprocessData):
             self.model = load_model(self.load_model_path)
             self.model.summary()
 
-
         # Define input shape and compile model
         else:
             num_classes = y.shape[1]
             input_shape = (x.shape[1], x.shape[2], 1)
-            self.model = self.convolutional_model(input_shape, num_classes)
+            self.model = CNN.novel_cnn(input_shape, num_classes, self.optimizer)
 
         # Set up tensorboard and checkpoint monitoring
         tb_callbacks = TensorBoard(log_dir='./logs', histogram_freq=0, batch_size=self.batch_size, write_graph=True,
@@ -121,89 +119,6 @@ class TrainAudioClassificator(PreprocessData):
                                      mode='auto',
                                      period=1)
         self.callbacks_list = [checkpoint, tb_callbacks]
-
-    def convolutional_model(self, input_shape, num_classes):
-        """
-        A novel convolutional model network
-        :return:
-        """
-        model = Sequential()
-
-        model.add(Conv2D(16, 5, strides=5,
-                         padding='same',
-                         kernel_regularizer=l2(0.001),
-                         input_shape=input_shape
-                         ))
-        model.add(LeakyReLU())
-        # model.add(Dropout(0.4))
-        # model.add(BatchNormalization())
-
-
-        # VGG - 1 - Conv
-        model.add(Conv2D(32, 3, strides=3,
-                         kernel_regularizer=l2(0.001),
-                         padding='same'))
-        model.add(LeakyReLU())
-        # model.add(Dropout(0.4))
-        # model.add(BatchNormalization())
-        # model.add(MaxPool2D(2, 2))
-
-        # VGG - 3 - Conv
-        model.add(Conv2D(64, 2, strides=2,
-                         kernel_regularizer=l2(0.001),
-                         padding='same', ))
-        model.add(LeakyReLU())
-        # model.add(Dropout(0.4))
-        # model.add(BatchNormalization())
-
-        # VGG - 4 - Conv
-        model.add(Conv2D(128, (1, 1), strides=(1, 1),
-                         kernel_regularizer=l2(0.001),
-                         padding='same', ))
-        model.add(LeakyReLU())
-        # model.add(Dropout(0.3))
-        # model.add(BatchNormalization())
-        # model.add(MaxPool2D(2, 2))
-
-        # # VGG - 5 - Conv
-        # model.add(Conv2D(256, (1, 1), strides=(1, 1),
-        #                  kernel_regularizer=l2(0.001),
-        #                  padding='same', ))
-        #
-        # model.add(LeakyReLU())
-        # model.add(Dropout(0.3))
-        # model.add(BatchNormalization())
-
-        # # VGG - 6 - Conv
-        # model.add(Conv2D(256, (1, 1), strides=(1, 1),
-        #                  kernel_regularizer=l2(0.001),
-        #                  padding='same', ))
-        #
-        # model.add(LeakyReLU())
-        model.add(Dropout(0.3))
-        # model.add(BatchNormalization())
-        #
-        # model.add(MaxPool2D(2, 2))
-
-        # VGG - 4 - FCC
-        model.add(Flatten())
-        model.add(Dense(64))
-        model.add(LeakyReLU())
-        # model.add(Dense(128))
-        # model.add(LeakyReLU())
-        # model.add(Dense(128))
-        # model.add(LeakyReLU())
-
-        # VGG - 5 Output
-        model.add(Dense(num_classes, activation='softmax'))
-
-        # Print summary and compile model
-        model.summary()
-        model.compile(loss='categorical_crossentropy',
-                      optimizer=self.optimizer,
-                      metrics=['acc'])
-
-        return model
 
     def train(self, x_train, y_train, x_val, y_val):
         """
@@ -232,7 +147,7 @@ class TrainAudioClassificator(PreprocessData):
         else:
             self.model.fit_generator(self.preprocess_dataset_generator(mode='training'),
                                      steps_per_epoch=int(sum(self.n_training_samples.values())/self.batch_size),
-                                     epochs=20, verbose=1,
+                                     epochs=self.epochs, verbose=1,
                                      callbacks=self.callbacks_list,
                                      validation_data=self.preprocess_dataset_generator(mode='validation'),
                                      validation_steps=int(sum(self.n_validation_samples.values())/self.batch_size),
@@ -249,11 +164,13 @@ class TrainAudioClassificator(PreprocessData):
         """
         y_pred = []
         y_true = []
-        # TODO: Implement test generator.
-        # prediction = self.model.predict_generator(self.preprocess_dataset_generator(mode='testing'),
-        #                                           steps=15,
-        #                                           )
-        # Sequential.predict_generator()
+
+        if self.use_generator is True:
+            prediction = self.model.predict_generator(self.preprocess_dataset_generator(mode='testing'),
+                                                      steps=15,
+                                                      )
+            print(prediction.shape)
+        exit()
 
         # Loop through validation set
         for sample, label in tqdm(zip(x_test, y_test)):
@@ -298,9 +215,6 @@ class TrainAudioClassificator(PreprocessData):
         x = np.roll(x, nr_rolls, axis=0)
         y = np.roll(y, nr_rolls, axis=0)
 
-        # Pick the classes to use in the training set.
-        # self.choose_classes()
-
         # Concatenate the array
         x_train = np.concatenate(x[:-2], axis=0)
         y_train = np.concatenate(y[:-2], axis=0)
@@ -308,14 +222,6 @@ class TrainAudioClassificator(PreprocessData):
         y_val = y[-2]
         x_test = x[-1]
         y_test = y[-1]
-
-        # # Shuffle training data
-        # np.random.seed(42)
-        # np.random.shuffle(x_train)
-        # np.random.seed(42)
-        # np.random.shuffle(y_train)
-
-        # print(np.sum(y_train, axis=0))
 
         return x_train, y_train, x_test, y_test, x_val, y_val
 
@@ -338,6 +244,7 @@ def run(audio_model):
 
         # 1. Use pre-created features
         if audio_model.use_generator is False:
+
             # Create train and validation split
             x_train, y_train, _, _, x_val, y_val = audio_model.separate_loaded_data(nr_rolls=audio_model.fold)
 
@@ -352,7 +259,6 @@ def run(audio_model):
 
         # 2. Or use generator for each batch. This option is more memory friendly
         else:
-            # TODO: FIX THIS SHAIT TOMORROW
             x_train, y_train = next(audio_model.preprocess_dataset_generator(mode='training'))
 
             # Compile model
@@ -394,7 +300,7 @@ def main():
            task don't have to be repeated over and over
         4. Create a convolutional model. A simple one will do for beginners. At this point,
            make sure it trains and improves accuracy from the data.
-        5. Implement validation and testing lgorithms
+        5. Implement validation and testing algorithms
         6. When this pipeline is finished, work with the experimentation!
 
     """

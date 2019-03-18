@@ -21,7 +21,7 @@ from python_speech_features import mfcc, logfbank, fbank, sigproc, delta, get_fi
 from python_speech_features import sigproc
 import numpy as np
 from scipy.signal import spectral, spectrogram, periodogram, get_window
-
+import sys
 from matplotlib import pyplot as plt
 import configparser
 from keras.utils import to_categorical
@@ -268,11 +268,30 @@ def sbank(signal, samplerate=16000, winlen=0.025, winstep=0.01,
         second return value is the energy in each frame (total energy, unwindowed)
     """
     highfreq = highfreq or samplerate / 2
-    signal = sigproc.preemphasis(signal, preemph)
+    signal = sigproc.preemphasis(signal, 0)
     frames = sigproc.framesig(signal, winlen * samplerate, winstep * samplerate, winfunc)
+    pspec = sigproc.powspec(frames, nfft)
+    energys = np.sum(pspec, 1)  # this stores the total energy in each frame
+    energys = np.where(energys == 0, np.finfo(float).eps, energys)  # if energy is zero, we get problems with log
+
+
+
+    highfreq = highfreq or samplerate / 2
+    signal_hat = sigproc.preemphasis(signal, preemph)
+    frames = sigproc.framesig(signal_hat, winlen * samplerate, winstep * samplerate, winfunc)
     pspec = sigproc.powspec(frames, nfft)
     energy = np.sum(pspec, 1)  # this stores the total energy in each frame
     energy = np.where(energy == 0, np.finfo(float).eps, energy)  # if energy is zero, we get problems with log
+
+    plt.title('Power Spectral Density - Jackhammer', size=20)
+    plt.xlabel('Frequency (HZ')
+    plt.ylabel('Power (dB)')
+    plt.plot(energys, label='No Pre-Emphasis', color='r')
+    plt.plot(energy, label='With Pre-Emphasis')
+    plt.legend()
+    plt.show()
+    exit()
+
 
     fb = get_filterbanks(nfilt, nfft, samplerate, lowfreq, highfreq)
     feat = np.dot(pspec, fb.T)  # compute the filterbank energies
@@ -290,12 +309,12 @@ class PreprocessData:
         self.df = self.df.reset_index()
         # Find classes and create class distribution
         self.classes = [
-            'children_playing',
+            # 'children_playing',
             # 'air_conditioner',
-            'engine_idling',
+            # 'engine_idling',
             'siren',
-            'street_music',
-            # 'drilling',
+            # 'street_music',
+            'drilling',
             'jackhammer',
             # 'dog_bark',
             # 'gun_shot',
@@ -321,9 +340,12 @@ class PreprocessData:
         self.random_extraction = config['preprocessing'].getboolean('random_extraction')
 
         # Training parameters
-        self.n_training_samples = self.find_samples_per_epoch((1, 9))
-        self.n_validation_samples = self.find_samples_per_epoch((9, 10))
-        self.n_testing_samples = self.find_samples_per_epoch((10, 11))
+        self.n_training_samples = self.find_samples_per_epoch(start_fold=1, end_fold=9)
+        self.n_validation_samples = self.find_samples_per_epoch(start_fold=9, end_fold=10)
+        self.n_testing_samples = self.find_samples_per_epoch(start_fold=10, end_fold=11)
+        self.training_seed = np.random.seed()
+        self.validation_seed = np.random.seed()
+
         self.class_dist = [self.n_training_samples[classes] / sum(self.n_training_samples.values())
                            for classes in self.classes]
         self.prob_dist = pd.Series(self.class_dist, self.classes)
@@ -370,6 +392,9 @@ class PreprocessData:
 
         # Extract the log mel frequency filter banks
         elif feature_to_extract == 'logfbank':
+            # TODO: Fiks detta
+            Sxx = spectrogram(sample, rate, noverlap=240, nfft=512, window=get_window('hamming', 400, 512))
+
             sample_hat = logfbank(sample, rate,
                                   nfilt=self.n_filt,
                                   nfft=self.n_fft).T
@@ -404,14 +429,16 @@ class PreprocessData:
             rand_index = np.random.randint(0, sample.shape[0] - self.sample_length)
         return sample[rand_index:rand_index + self.sample_length]
 
-    def find_samples_per_epoch(self, folds=(1, 9)):
+    def find_samples_per_epoch(self, start_fold=1, end_fold=9):
         """
-        Finds out the number of possible samples based on the step length
-        :param folds: folds to checl
+        Finds all the samples that exist in the data set for a particular class.
+        It then checks the defined step length and checks how many possible samples that
+        that can be extracted for the class.
+        :param folds: what folds to check
         :return:
         """
         samples_dict = {}
-        for fold in range(folds[0], folds[1]):
+        for fold in range(start_fold, end_fold):
             # Find all the files in the fold
             files_in_fold = self.df[self.df.fold == fold]
 
@@ -449,10 +476,10 @@ class PreprocessData:
         # Choose fold to start from
         if mode == 'training':
             fold = 1
-            seed = None
+            seed = self.training_seed
         elif mode == 'validation':
             fold = validation_folds
-            seed = 42
+            seed = self.validation_seed
         elif mode == 'testing':
             fold = testing_folds
             seed = 42
@@ -463,8 +490,6 @@ class PreprocessData:
 
             # Find the files in the current fold
             files_in_fold = self.df.loc[self.df.fold == fold]
-            # Reseed the generator
-            s = np.random.seed()
 
             # Loop through the files in the fold and create a batch
             for n in range(self.batch_size):
@@ -598,8 +623,8 @@ class PreprocessData:
         fold_list_y = []
 
         _min, _max = float('inf'), -float('inf')  # Initialize min and max for x
-        folds = list(np.unique(self.df['fold']))  # The folds to loop through
-        self.df = self.df.reset_index()
+        folds = list(np.unique(self.df['fold']))  # Initialize the folds to loop through
+        self.df = self.df.reset_index()           # Reset the data frame index
 
         # Build feature samples
         for idx, fold in enumerate(folds):
@@ -609,9 +634,9 @@ class PreprocessData:
             # Get the filenames that exists in that fold
             files_in_fold = self.df.loc[self.df.fold == fold]  # Get the filenames that exists in that fold
 
-            # samples_per_fold = 2 * int(files_in_fold['length'].sum() / 0.1)  # the number of samples for each fold
-            samples_per_fold = sum(self.find_samples_per_epoch((fold, fold + 1)).values())
-            print(samples_per_fold)
+            # Multiply the number of sample by 1.2 to add some overlapping samples
+            samples_per_fold = sum(self.find_samples_per_epoch(fold, fold + 1).values())*1.2
+            print(f'Extracting {samples_per_fold} samples for fold {fold}:\n')
 
             # Loop through the files in the fold
             for _ in tqdm(range(samples_per_fold)):
@@ -788,18 +813,29 @@ if __name__ == '__main__':
     # # for b in banks:
     # #     plt.plot(b)
     # # plt.show()
-    # c = 'drilling'
-    # wav_file = df[df.label == c].iloc[0, 0]
-    # fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
-    # target_sr = 16000
-    # signal, sr = sf.read(f'../Datasets/audio/original/fold{fold}/{wav_file}')
-    # signal = preprocessing.make_signal_mono(signal)
-    # signal, sr = preprocessing.resample_signal(signal, orig_sr=sr, target_sr=target_sr)
-    #
-    # fourier = calc_fft(signal, target_sr)
-    # plt.title("drilling")
-    # plt.plot(fourier)
-    #
+    c = 'jackhammer'
+    wav_file = df[df.label == c].iloc[0, 0]
+    fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
+    target_sr = 16000
+    signal, sr = sf.read(f'../Datasets/audio/original/fold{fold}/{wav_file}')
+    signal = preprocessing.make_signal_mono(signal)
+    signal, sr = preprocessing.resample_signal(signal, orig_sr=sr, target_sr=target_sr)
+
+    sbank(signal, sr, preemph=0.9)
+
+    mask = preprocessing.envelope(signal, sr, 0.027)
+
+    fourier_mask = calc_fft(signal[mask], sr)
+    fourier = calc_fft(signal, sr)
+    plt.title("Jackhammer", size=20)
+    plt.xlabel('Frequency (Hz)', size=10)
+    plt.ylabel('Magnitude', size=10)
+    plt.plot(fourier_mask[1], fourier_mask[0], color='r', label='After Thresholding')
+    plt.plot(fourier[1], fourier[0], label='Before Thresholding')
+    plt.legend()
+    plt.show()
+    exit()
+
     # f, t, Sxx = spectrogram(signal, target_sr, noverlap=240, nfft=512, window=get_window('hamming', 400, 512))
     # pow_spec = preprocessing.calculate_power_spectrum(signal, target_sr, winfunc=lambda x: np.hamming(x, )).T
     # # period = periodogram(signal, target_sr, window=get_window('hanning', 400, 512), nfft=512)
