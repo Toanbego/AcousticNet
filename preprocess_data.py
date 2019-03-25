@@ -2,35 +2,33 @@
 Author - Torstein Gombos
 Date - 08.01.2019
 
-Script that is i used to plot and analyze the audio signals.
-Various tests can be run in regards to sampling rates, feature extraction and etc.
-
-The script is also used to clean and downsample signals so they are of equal length and size.
+Preprocessing script for all your preprocessing needs
 """
 
 
-import pandas as pd
-import argparse
+# Signal processing libraries
+import pywt
 import resampy
-
-from tqdm import tqdm
 import librosa
 from scipy.io import wavfile
 import soundfile as sf
 from python_speech_features import mfcc, logfbank, fbank, sigproc, delta, get_filterbanks
 from python_speech_features import sigproc
+from scipy.signal import spectrogram, get_window
+
+# Standard libraries
+import pandas as pd
+import argparse
+from tqdm import tqdm
 import numpy as np
-from scipy.signal import spectral, spectrogram, periodogram, get_window
-import sys
 from matplotlib import pyplot as plt
 import configparser
 from keras.utils import to_categorical
-import plotting_functions
 
-
-# Parse the config.ini file
+# Parse the config.ini file§
 config = configparser.ConfigParser()
 config.read("config.ini")
+
 
 def parse_arguments():
     """
@@ -130,125 +128,6 @@ def mel2hz(mel):
     return 700*(10**(mel/2595.0)-1)
 
 
-def get_filterbanks(nfilt=20, nfft=512, samplerate=16000, lowfreq=0, highfreq=None):
-    """Compute a Mel-filterbank. The filters are stored in the rows, the columns correspond
-    to fft bins. The filters are returned as an array of size nfilt * (nfft/2 + 1)
-
-    :param nfilt: the number of filters in the filterbank, default 20.
-    :param nfft: the FFT size. Default is 512.
-    :param samplerate: the samplerate of the signal we are working with. Affects mel spacing.
-    :param lowfreq: lowest band edge of mel filters, default 0 Hz
-    :param highfreq: highest band edge of mel filters, default samplerate/2
-    :returns: A numpy array of size nfilt * (nfft/2 + 1) containing filterbank. Each row holds 1 filter.
-    """
-    highfreq = highfreq or samplerate/2
-    assert highfreq <= samplerate/2, "highfreq is greater than samplerate/2"
-
-    # compute points evenly spaced in mels
-    lowmel = hz2mel(lowfreq)
-    highmel = hz2mel(highfreq)
-    melpoints = np.linspace(lowmel, highmel, nfilt+2)
-    # our points are in Hz, but we use fft bins, so we have to convert
-    #  from Hz to fft bin number
-    bin = np.floor((nfft+1)*mel2hz(melpoints)/samplerate)
-
-    fbank = np.zeros([nfilt,nfft//2+1])
-    for j in range(0,nfilt):
-        for i in range(int(bin[j]), int(bin[j+1])):
-            fbank[j, i] = (i - bin[j]) / (bin[j+1]-bin[j])
-        for i in range(int(bin[j+1]), int(bin[j+2])):
-            fbank[j, i] = (bin[j+2]-i) / (bin[j+2]-bin[j+1])
-    return fbank
-
-
-def extract_features(signal, rate, win_func=lambda x: np.hamming(x, ), clean=False, fft=False, filterbank=False,
-                     mffc=False, dynamic_threshold=False):
-    """
-    Reads a signal and calculates the fft, filter bank and mfcc.
-    Always return the signal.
-    :param win_func:
-    :param signal: Audio signal of time
-    :param rate: Sample rate of signal
-    :param clean: Removes low amplitudes from the signal
-    :param fft: Return the frequency and magnitude from the fast fourier transform
-    :param filterbank: Return the log filter bank spectrogram
-    :param mffc: Return the Mel Frequency Cepstrum
-    :param dynamic_threshold:
-    :return:
-    """
-
-    list_of_returns = list()
-
-    # Clean signal
-    if clean is True:
-        threshold = 0.006
-
-        # Use dynamic threshold reduction
-        if dynamic_threshold is True:
-            mask = np.array(preprocessing.envelope(signal, rate, threshold=threshold))
-
-            # If threshold is to high, reduce the threshold
-            while mask.sum() < (len(signal)*0.8):
-                print("Threshold is to high. Reducing threshold")
-                threshold *= 0.95
-                mask = np.array(preprocessing.envelope(signal, rate, threshold=threshold))
-
-        else:
-            mask = preprocessing.envelope(signal, rate, threshold=threshold, dynamic_threshold=False)
-
-        # Mask the signal
-        signal = signal[mask]
-
-    list_of_returns.append(signal)
-
-    # Calculate fourier transform
-    if fft is True:
-        fft = calc_fft(signal, rate)
-        list_of_returns.append(fft)
-
-    # Find filter bank coefficients
-    if filterbank is True:
-        bank = sbank(signal, rate)[0]
-        bank = np.log(bank).T
-        list_of_returns.append(bank)
-
-    # Find mel frequency
-    if mffc is True:
-        mel = mfcc(signal, rate, winfunc=win_func).T
-        list_of_returns.append(mel)
-
-    return list_of_returns
-
-
-def plot_data(signals=None, fbank=None, mfccs=None, fft=None):
-    """
-    Plots the data
-    :return:
-    """
-    # Plot class distribution
-    plotting_functions.plot_class_distribution(class_dist)
-
-    # Plot the time signal
-    if signals is not None:
-        plotting_functions.plot_signals(signals, channel='Stereo')
-        plt.show()
-
-    # Plot Fourier Transform
-    if fft is not None:
-        plotting_functions.plot_fft(fft, channel='Stereo')
-        plt.show()
-
-    # Plot the filter banks
-    if fbank is not None:
-        plotting_functions.plot_fbank(fbank)
-        plt.show()
-
-    # Plot the Mel Cepstrum Coefficients
-    if mfccs is not None:
-        plotting_functions.plot_mfccs(mfccs)
-        plt.show()
-
-
 def sbank(signal, samplerate=16000, winlen=0.025, winstep=0.01,
           nfilt=26, nfft=512, lowfreq=0, highfreq=None, preemph=0.95,
           winfunc=lambda x: np.ones((x,))):
@@ -303,10 +182,7 @@ def sbank(signal, samplerate=16000, winlen=0.025, winstep=0.01,
 class PreprocessData:
 
     def __init__(self, df):
-        # DataFrame
-        self.length_files = df.loc[df['length'] > config['preprocessing'].getfloat('signal_length')]
-        self.df = df.loc[df['length'] >= 3.5]
-        self.df = self.df.reset_index()
+
         # Find classes and create class distribution
         self.classes = [
             # 'children_playing',
@@ -321,42 +197,49 @@ class PreprocessData:
             # 'car_horn'
         ]
 
+        # DataFrame
+        self.df = df.loc[df['length'] > config['preprocessing'].getfloat('signal_length')]
+        self.df = self.df.reset_index()
+
         # Audio parameters
-        self.network_type = config['model']['net']
         self.save_file = config['preprocessing']['save_file']
         self.randomize_rolls = config['preprocessing'].getboolean('randomize_roll')
+        self.random_extraction = config['preprocessing'].getboolean('random_extraction')
 
         self.feature = config['preprocessing']['feature']
         self.n_filt = config['preprocessing'].getint('n_filt')
         self.n_feat = config['preprocessing'].getint('n_feat')
         self.n_fft = config['preprocessing'].getint('n_fft')
+        self.delta_delta = config['preprocessing'].getboolean('delta_delta')
         self.rate = config['preprocessing'].getint('rate')
-        self.step_length = config['preprocessing'].getfloat('step_size')
-        self.sample_length = int(self.rate * self.step_length)
+        self.step_length = config['preprocessing'].getfloat('step_size')    # Given in seconds
+        self.sample_length = int(self.rate * self.step_length)              # Given in samples
 
-        self.activate_threshold = config['preprocessing'].getboolean('activate_threshold')
+        self.activate_envelope = config['preprocessing'].getboolean('activate_threshold')
         self.threshold = config['preprocessing'].getfloat('threshold')
-        self.n_samples = config['preprocessing'].getint('n_samples')
-        self.random_extraction = config['preprocessing'].getboolean('random_extraction')
 
-        # Training parameters
+        # Sample parameters
         self.n_training_samples = self.find_samples_per_epoch(start_fold=1, end_fold=9)
         self.n_validation_samples = self.find_samples_per_epoch(start_fold=9, end_fold=10)
         self.n_testing_samples = self.find_samples_per_epoch(start_fold=10, end_fold=11)
-        self.training_seed = np.random.seed()
-        self.validation_seed = np.random.seed()
+        self.training_seed, self.validation_seed = np.random.randint(0, 100000, 2)
+        self.testing_seed = 42
 
+        # Create distribution for classes
         self.class_dist = [self.n_training_samples[classes] / sum(self.n_training_samples.values())
                            for classes in self.classes]
         self.prob_dist = pd.Series(self.class_dist, self.classes)
+
         self.validation_fold = None
 
     def build_feature_from_signal(self, sample, rate, file_path, feature_to_extract='mfcc',
-                                  activate_threshold=False, seed=None):
+                                  activate_threshold=False, seed=None, delta_delta=False, random_extraction=True):
         """
         Reads the signal from the file path. Then build mffc features that is returned.
         If the signal is stereo, the signal will be split up and only the first channel is used.
         Later implementations should consist of using both channels, and being able to select other features than mfccs
+        :param random_extraction: Activate to extract a random clip of the sample
+        :param delta_delta: Append the delta_delta to the end of the feature vectors
         :param sample:
         :param rate:
         :param seed: None by default
@@ -365,7 +248,7 @@ class PreprocessData:
         :param activate_threshold: A lower boundary to filter out weak signals
         :return:
         """
-        if self.random_extraction is True:
+        if random_extraction is True:
             # Read file
             sample, rate = sf.read(file_path)
             sample = self.make_signal_mono(sample)
@@ -392,8 +275,15 @@ class PreprocessData:
 
         # Extract the log mel frequency filter banks
         elif feature_to_extract == 'logfbank':
-            # TODO: Fiks detta
-            Sxx = spectrogram(sample, rate, noverlap=240, nfft=512, window=get_window('hamming', 400, 512))
+
+            # Sxx = spectrogram(sample,
+            #                   rate, noverlap=240,
+            #                   nfft=self.n_fft, window=get_window('hanning', 400, self.n_fft))[2].T
+            #
+            # banks = get_filterbanks(self.n_filt, self.n_fft, rate)
+            # feat = np.dot(Sxx, banks.T)  # compute the filterbank energies
+            # feat = np.where(feat == 0, np.finfo(float).eps, feat)  # if feat is zero, we get problems with log
+            # sample_hat = np.log(feat)
 
             sample_hat = logfbank(sample, rate,
                                   nfilt=self.n_filt,
@@ -405,16 +295,37 @@ class PreprocessData:
                                nfilt=self.n_filt,
                                nfft=self.n_fft)[0].T
 
+        # Extract the log of the power spectrum
         elif feature_to_extract == 'spectogram':
-            f, t, Sxx = spectrogram(sample, rate, noverlap=240,
-                                           nfft=512,
-                                           window=get_window('hamming', 400, 512))
+            _, _, Sxx = spectrogram(sample, rate, noverlap=240,
+                                           nfft=self.n_fft,
+                                           window=get_window('hamming', 400, self.n_fft))
             sample_hat = np.where(Sxx == 0, np.finfo(float).eps, Sxx)
             sample_hat = np.log(sample_hat)
 
+
+        elif feature_to_extract == 'scalogram':
+            morlet_transform = pywt.ContinuousWavelet('morl')
+            scales = pywt.scale2frequency(morlet_transform, 9)
+            print(scales)
+            coefs, freqs = pywt.cwt(sample, scales=scales, wavelet=morlet_transform)
+
+
+            exit()
+
+
         else:
-            raise ValueError('Please choose an existing feature in the config.ini file: mfcc, logfbank, '
-                             'spectogram or fbank')
+            raise ValueError('Please choose an existing feature in the config.ini file:'
+                             '\n    - MFCC'
+                             '\n    - LogFBank, '
+                             '\n    - Spectogram '
+                             '\n    - Fbank')
+
+        # Apply the change of the dynamics to the feature vector
+        if delta_delta is True:
+            d = delta(sample_hat.T, 2)
+            sample_hat = np.append(sample_hat.T, d, axis=0)
+
         return sample_hat
 
     def select_random_audio_clip(self, sample, seed=None):
@@ -434,7 +345,8 @@ class PreprocessData:
         Finds all the samples that exist in the data set for a particular class.
         It then checks the defined step length and checks how many possible samples that
         that can be extracted for the class.
-        :param folds: what folds to check
+        :param start_fold: Start fold to start checking from
+        :param end_fold: The last fold to check. Program checks all folds in between
         :return:
         """
         samples_dict = {}
@@ -453,6 +365,79 @@ class PreprocessData:
                     samples_dict[classes] = int(files_with_class['length'].sum()/self.step_length)
         return samples_dict
 
+    def generate_labels(self, seed=42):
+        """
+        Used with the generator to create the labels for the predict_generator during testing.
+        :param seed:
+        :return:
+        """
+        labels = []
+        np.random.seed(seed)
+        # Loop through the files in the fold and create a batch
+        for n in range(sum(self.n_testing_samples.values())):
+            # Pick a random class from the probability distribution and then a random file with that class
+            rand_class = np.random.choice(self.classes, p=self.prob_dist)
+            labels.append(rand_class)
+
+        # One-hot encode the labels and append
+        labels = np.array(labels)
+        # labels = to_categorical(labels, num_classes=len(self.classes))
+        return labels
+
+    def generate_data_for_predict_generator(self, labels_to_predict):
+        """
+        This is the generator to use for the predict generator
+        :param labels_to_predict:
+        :return:
+        """
+
+        _min, _max = float('inf'), -float('inf')    # Initialize min and max for x
+        folds = np.unique(self.df['fold'])          # The folds to loop through
+        folds = np.roll(folds, folds[-1] - self.fold)
+        testing_folds = folds[-1]
+        print(f"testing on fold {testing_folds}")
+        np.random.seed(42)
+        n = 0
+        while True:
+            x = []  # Set up lists
+
+            # Find the files in the current fold
+            files_in_fold = self.df.loc[self.df.fold == testing_folds]
+
+            # Loop through the files in the fold and create a batch
+            for i in range(self.batch_size):
+                label = labels_to_predict[n+i]
+
+                # Pick a random file with that class
+                file = np.random.choice(files_in_fold[self.df.label == label].slice_file_name)
+                file_path = f'../Datasets/audio/lengthy_audio/fold{testing_folds}/{file}'
+
+                # Extract feature from signal
+                x_sample = self.build_feature_from_signal(None, None, file_path,
+                                                          feature_to_extract=self.feature,
+                                                          activate_threshold=self.activate_envelope,
+                                                          seed=None,
+                                                          delta_delta=self.delta_delta,
+                                                          random_extraction=self.random_extraction)
+
+                # Update min and max values
+                _min = min(np.amin(x_sample), _min)
+                _max = max(np.amax(x_sample), _max)
+
+                try:
+                    # Create batch set with corresponding labels
+                    x.append(x_sample)
+                except AttributeError:
+                    print("hold up")
+
+            # Normalize X and reshape the features
+            x = np.array(x)
+            x = (x - _min) / (_max - _min)  # Normalize x and y
+            x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 1)  # Reshape all to same size
+
+            n += self.batch_size
+            yield x
+
     def preprocess_dataset_generator(self, mode='training'):
         """
         Pre-processes a batch of data which is yielded for every function call. Size is defined by batch size
@@ -463,12 +448,12 @@ class PreprocessData:
         """
 
         _min, _max = float('inf'), -float('inf')    # Initialize min and max for x
-        folds = np.unique(self.df['fold'])    # The folds to loop through
+        folds = np.unique(self.df['fold'])          # The folds to loop through
 
         # Separate folds into training, validation and split
         folds = np.roll(folds, folds[-1] - self.fold)
-        training_folds = folds[:-1]
-        validation_folds = folds[-1]
+        training_folds = folds[:-2]
+        validation_folds = folds[-2]
         testing_folds = folds[-1]
 
         self.validation_fold = self.fold
@@ -476,13 +461,14 @@ class PreprocessData:
         # Choose fold to start from
         if mode == 'training':
             fold = 1
-            seed = self.training_seed
+            np.random.seed(self.training_seed)
         elif mode == 'validation':
             fold = validation_folds
-            seed = self.validation_seed
+            np.random.seed(self.validation_seed)
         elif mode == 'testing':
             fold = testing_folds
-            seed = 42
+            # seed = 42
+            np.random.seed(self.testing_seed)
 
         # Build feature samples
         while True:
@@ -502,8 +488,11 @@ class PreprocessData:
                 # Extract feature from signal
                 x_sample = self.build_feature_from_signal(None, None, file_path,
                                                           feature_to_extract=self.feature,
-                                                          activate_threshold=self.activate_threshold,
-                                                          seed=seed)
+                                                          activate_threshold=self.activate_envelope,
+                                                          delta_delta=self.delta_delta,
+                                                          random_extraction=self.random_extraction
+                                                          # seed=seed
+                                                          )
 
                 # If the flag is set, it means it could not process current file and it moves to next.
                 if x_sample == 'move to next file':
@@ -526,10 +515,10 @@ class PreprocessData:
             x = (x - _min) / (_max - _min)                          # Normalize x and y
             x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 1)    # Reshape all to same size
 
-            # One-hot encode the labels and append to fold
-            y = to_categorical(y, num_classes=len(self.classes))    # One hot encoding
+            # One-hot encode the labels and append
+            y = to_categorical(y, num_classes=len(self.classes))
 
-            # Reset fold number when reaching the end
+            # Reset fold number when reaching the end of the training folds
             if mode == 'training':
                 fold += 1
 
@@ -537,7 +526,11 @@ class PreprocessData:
                     fold = 1
 
             # Return data and labels
-            yield x, y
+            if mode == 'validation' or mode == 'training':
+                yield x, y
+
+            elif mode == 'testing':
+                yield x
 
     def preprocess_dataset(self):
         """
@@ -586,7 +579,7 @@ class PreprocessData:
                                                                   rate,
                                                                   None,
                                                                   feature_to_extract=self.feature,
-                                                                  activate_threshold=self.activate_threshold)
+                                                                  activate_threshold=self.activate_envelope)
 
                         # Update min and max
                         _min = min(np.amin(x_sample), _min)
@@ -649,7 +642,7 @@ class PreprocessData:
                 # Extract feature from signal
                 x_sample = self.build_feature_from_signal(None, None, file_path,
                                                           feature_to_extract=self.feature,
-                                                          activate_threshold=self.activate_threshold)
+                                                          activate_threshold=self.activate_envelope)
 
                 # If the flag is set, it means it could not process current file and it moves to next.
                 if x_sample == 'move to next file':
@@ -764,7 +757,8 @@ class PreprocessData:
                           data=signal_hat)
 
     def calculate_power_spectrum(self, signal, samplerate=16000, winlen=0.025, winstep=0.01,
-                                 nfilt=26, nfft=512, preemph=0.97,
+                                 nfft=512,
+                                 preemph=0.97,
                                  winfunc=lambda x: np.ones((x,))):
         """
         Frames a signal and calculates the power spectrum
@@ -813,13 +807,30 @@ if __name__ == '__main__':
     # # for b in banks:
     # #     plt.plot(b)
     # # plt.show()
-    c = 'jackhammer'
+    c = 'siren'
     wav_file = df[df.label == c].iloc[0, 0]
     fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
     target_sr = 16000
     signal, sr = sf.read(f'../Datasets/audio/original/fold{fold}/{wav_file}')
     signal = preprocessing.make_signal_mono(signal)
     signal, sr = preprocessing.resample_signal(signal, orig_sr=sr, target_sr=target_sr)
+
+    signal_logfbank = preprocessing.build_feature_from_signal(signal, sr, None, activate_threshold=False,
+                                                              feature_to_extract='spectogram', random_extraction=False,
+                                                              delta_delta=False)
+
+
+
+    # signal_logfbank = logfbank(signal, sr).T
+
+    plt.imshow(signal_logfbank, cmap='viridis', interpolation='nearest')
+    plt.show()
+    # signal_logfbank -= (np.mean(signal_logfbank, axis=0) + 1e-8)
+    # plt.imshow(signal_logfbank, cmap='hot', interpolation='nearest')
+    # plt.show()
+
+
+    exit()
 
     sbank(signal, sr, preemph=0.9)
 
@@ -841,29 +852,8 @@ if __name__ == '__main__':
     # # period = periodogram(signal, target_sr, window=get_window('hanning', 400, 512), nfft=512)
     # logo = np.log(sbank(signal, target_sr, winfunc=lambda x: np.hamming(x, ))[0]).T
     #
-    # filterbanks = get_filterbanks(26, 512, 16000).T
-    #
-    # logfbank = np.log(np.dot(Sxx.T, filterbanks).T)
-    #
-    # plt.title("specto")
-    # plt.pcolormesh(t, f, np.log(Sxx))
-    # plt.ylabel('Frequency [Hz]')
-    # plt.xlabel('Time [sec]')
-    # plt.show()
-    #
-    # plt.title("logo")
-    # plt.imshow(logfbank, cmap='hot', interpolation='nearest')
-    # plt.show()
-    #
-    # # plt.figure(figsize=(20, 15))
-    # # plt.imshow(np.log(spectog[2]))
-    # # plt.show()
-    # plt.title("pow_spec")
-    # plt.imshow(np.log(pow_spec))
-    # plt.show()
-    #
-    #
-    # exit()
+    filterbanks = get_filterbanks(26, 512, 16000).T
+
 
     classes = ['siren', 'jackhammer']
 
@@ -951,11 +941,8 @@ if __name__ == '__main__':
         # axes[1, 1].set_title("Low_freq")
         # axes[1, 1].imshow(logfbank_low_no_mask[c], cmap='hot', interpolation='nearest')
 
-    plt.show()
+        # plt.show()
 
-    # Clean and downsample the wav files
-    if args.clean_files == 'True':
-        preprocessing.hi_pass_filter(8000)
 
 
 

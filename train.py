@@ -4,13 +4,11 @@ import configparser
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
+
 # ML libraries
 from sklearn.metrics import confusion_matrix
 from keras.models import load_model
-from keras.layers import Conv2D, MaxPool2D, Flatten, BatchNormalization
-from keras.layers import Dropout, Dense, LeakyReLU
-from keras.models import Sequential
-from keras.regularizers import l1, l2
+
 from keras.callbacks import ModelCheckpoint, TensorBoard
 from sklearn.utils.class_weight import compute_class_weight
 import keras.optimizers
@@ -140,7 +138,6 @@ class TrainAudioClassificator(PreprocessData):
                            callbacks=self.callbacks_list,
                            class_weight=self.class_weight,
                            validation_data=(x_val, y_val)
-
                            )
 
         # Train on generated data batch-by-batch. Better for memory
@@ -155,7 +152,7 @@ class TrainAudioClassificator(PreprocessData):
                                      # workers=2, use_multiprocessing=True,
                                      shuffle=True, initial_epoch=0)
 
-    def test(self, x_test, y_test):
+    def test_model(self, x_test, y_test):
         """
         Method that manually performs testing on the validation set with a trained model
         :param x_test: test data
@@ -165,26 +162,34 @@ class TrainAudioClassificator(PreprocessData):
         y_pred = []
         y_true = []
 
+        # Sequential.predict_generator()
         if self.use_generator is True:
-            prediction = self.model.predict_generator(self.preprocess_dataset_generator(mode='testing'),
-                                                      steps=15,
+            # generate labels for the test set which is used to generate the test set.
+            y_true = self.generate_labels()
+            prediction = self.model.predict_generator(self.generate_data_for_predict_generator(y_true),
+                                                      steps=int(sum(self.n_testing_samples.values())/self.batch_size)
+
                                                       )
-            print(prediction.shape)
-        exit()
+            # Decode from one-hot encoding
+            prediction = np.argmax(prediction, axis=1)
+            for pred in prediction:
+                y_pred.append(self.classes[pred])
 
-        # Loop through validation set
-        for sample, label in tqdm(zip(x_test, y_test)):
-            sample = np.resize(sample, (1,
-                                        sample.shape[0],
-                                        sample.shape[1],
-                                        sample.shape[2]))           # Resize sample to fit model
-            prediction = self.model.predict(sample)                 # Make a prediction
+        # Uses a pre-loaded data set
+        else:
+            # Loop through validation set
+            for sample, label in tqdm(zip(x_test, y_test)):
+                sample = np.resize(sample, (1,
+                                            sample.shape[0],
+                                            sample.shape[1],
+                                            sample.shape[2]))           # Resize sample to fit model
+                prediction = self.model.predict(sample)                 # Make a prediction
 
-            y_pred.append(self.classes[np.argmax(prediction)])      # Append the prediction to the list
-            y_true.append(self.classes[np.argmax(label)])
+                y_pred.append(self.classes[np.argmax(prediction)])      # Append the prediction to the list
+                y_true.append(self.classes[np.argmax(label)])
 
         # Create confusion matrix calculate accuracy
-        matrix = confusion_matrix(y_true, y_pred, self.classes)
+        matrix = confusion_matrix(y_true[:len(y_pred)], y_pred, self.classes)
         accuracy = np.trace(matrix)/np.sum(matrix)
         print("\n")
         print(self.classes)
@@ -273,14 +278,16 @@ def run(audio_model):
     # Test a network
     elif audio_model.network_mode == 'test_network':
 
-        # Create train and validation split
-        _, _, x_test, y_test, _, _ = audio_model.separate_loaded_data(nr_rolls=audio_model.fold)
+        # Load data set if not using the generator
+        if audio_model.use_generator is not True:
+            # Create train and validation split
+            _, _, x_test, y_test, _, _ = audio_model.separate_loaded_data(nr_rolls=audio_model.fold)
 
         # Compile model
-        audio_model.set_up_model(x_test, y_test)
+        audio_model.set_up_model(None, None)
 
         # Test network
-        audio_model.test(x_test, y_test)
+        audio_model.test_model(None, None)
 
     else:
         raise ValueError('Choose a valid Mode')
