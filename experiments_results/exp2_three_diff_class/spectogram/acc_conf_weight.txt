@@ -1,0 +1,30 @@
+weights.07-0.57_spectogram_fold10.hdf5
+0.7868852459016393
+['siren', 'street_music', 'jackhammer']
+[[46 32  4]
+ [ 9 72  7]
+ [ 0  0 74]]
+weights.14-0.55_spectogram_fold10.hdf5
+0.7868852459016393
+['siren', 'street_music', 'jackhammer']
+[[48 25  9]
+ [12 70  6]
+ [ 0  0 74]]
+weights.11-0.73_spectogram_fold10.hdf5
+0.7868852459016393
+['siren', 'street_music', 'jackhammer']
+[[53 27  2]
+ [18 68  2]
+ [ 0  3 71]]
+weights.13-0.62_spectogram_fold10.hdf5
+0.7991803278688525
+['siren', 'street_music', 'jackhammer']
+[[46 30  6]
+ [ 9 75  4]
+ [ 0  0 74]]
+weights.60-0.89_spectogram_fold10.hdf5
+0.8360655737704918
+['siren', 'street_music', 'jackhammer']
+[[49 33  0]
+ [ 4 81  3]
+ [ 0  0 74]]

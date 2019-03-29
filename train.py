@@ -2,8 +2,9 @@
 # Standard libraries
 import configparser
 import pandas as pd
-import matplotlib.pyplot as plt
 import numpy as np
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 # ML libraries
 from sklearn.metrics import confusion_matrix
@@ -12,6 +13,7 @@ from keras.models import load_model
 from keras.callbacks import ModelCheckpoint, TensorBoard
 from sklearn.utils.class_weight import compute_class_weight
 import keras.optimizers
+import keras.backend as backend
 
 # Miscellaneous
 from tqdm import tqdm
@@ -36,6 +38,14 @@ def load_and_extract_features(filepath):
     return features['x'], features['y']
 
 
+class LearningRateHistory(keras.callbacks.Callback):
+    """
+    Callback object that prints the learning rate
+    """
+    def on_epoch_end(self, epoch, logs=None):
+        print(eval(self.model.optimizer.lr))
+
+
 class TrainAudioClassificator(PreprocessData):
     """
     Class object for training a model to classify acoustic sounds
@@ -47,15 +57,14 @@ class TrainAudioClassificator(PreprocessData):
         PreprocessData.__init__(self, df)
 
         # Audio parameters
-        self.load_feature = config['model']['load_features']
         self.randomize_rolls = config['model'].getboolean('randomize_roll')
         self.fold = config['model'].getint('fold')
         self.epochs = config['model'].getint('epochs')
         self.batch_size = config['model'].getint('batch_size')
+        self.batch_size_for_test = 4
         self.learning_rate = config['model'].getfloat('learning_rate')
         self.fold = config['model'].getint('fold')
         self.steps_per_epoch = config['model'].getint('steps_per_epoch')
-        self.use_generator = config['model'].getboolean('use_generator')
 
         # Chooses optimizer
         self.optimizer = config['model']['optimizer']
@@ -66,6 +75,8 @@ class TrainAudioClassificator(PreprocessData):
 
         # Choose model
         self.network_mode = config['model']['network_mode']
+        self.test_mode = config['model']['test_mode']
+        self.network_architecture = config['model']['network_architecture']
         self.load_model_path = config['model']['load_model']
         self.load_weights = config['model'].getboolean('load_weights')
 
@@ -93,142 +104,125 @@ class TrainAudioClassificator(PreprocessData):
         :return:
         """
         # Load weights if activated
-        if self.load_weights is True or self.network_mode == 'test_network':
-            self.model = load_model(self.load_model_path)
-            self.model.summary()
-
-        # Define input shape and compile model
-        else:
+        if self.load_weights is True or self.network_mode == 'train_network':
             num_classes = y.shape[1]
             input_shape = (x.shape[1], x.shape[2], 1)
-            self.model = CNN.novel_cnn(input_shape, num_classes, self.optimizer)
+            self.model = CNN.fetch_network(self.network_architecture,
+                                           input_shape, num_classes, self.optimizer)
+
+        # Define input shape and compile model
+        elif self.load_weights is True:
+            self.model = load_model(self.load_model_path)
+            self.model.summary()
 
         # Set up tensorboard and checkpoint monitoring
         tb_callbacks = TensorBoard(log_dir='./logs', histogram_freq=0, batch_size=self.batch_size, write_graph=True,
                                    write_grads=True, write_images=False, embeddings_freq=0,
                                    embeddings_layer_names=None, embeddings_metadata=None, embeddings_data=None,
-                                   update_freq=500)
-        # TODO: check val_loss instead of val_acc
-        checkpoint = ModelCheckpoint('weights/weights.{epoch:02d}-{val_acc:.2f}'+f'_{self.feature}_fold{self.validation_fold}.hdf5',
+                                   update_freq=1500)
+
+        checkpoint = ModelCheckpoint('weights/weights.{epoch:02d}-{val_acc:.2f}' +
+                                     f'_{self.feature}_fold{self.validation_fold}.hdf5',
                                      monitor='val_acc',
                                      verbose=1,
-                                     save_best_only=True,
+                                     save_best_only=False,
                                      save_weights_only=False,
                                      mode='auto',
                                      period=1)
-        self.callbacks_list = [checkpoint, tb_callbacks]
+        self.callbacks_list = [checkpoint, tb_callbacks, LearningRateHistory()]
 
-    def train(self, x_train, y_train, x_val, y_val):
+    def train(self):
         """
         Trains the model on data and validates after every epoch.
-        :param x_train:
-        :param y_train:
-        :param x_val:
-        :param y_val:
         :return:
         """
-        # keras.Sequential.fit()
+        # Train on data extracted
+        keras.Sequential.fit_generator()
+        self.model.fit_generator(self.preprocess_dataset_generator(mode='training'),
+                                 steps_per_epoch=int(sum(self.n_training_samples.values())/self.batch_size),
+                                 epochs=self.epochs, verbose=1,
+                                 callbacks=self.callbacks_list,
+                                 validation_data=self.preprocess_dataset_generator(mode='validation'),
+                                 validation_steps=int(sum(self.n_validation_samples.values())/self.batch_size),
+                                 class_weight=None, max_queue_size=3,
+                                 # workers=2, use_multiprocessing=True,
+                                 shuffle=True, initial_epoch=60)
 
-        # Train on pre-made features
-        if self.use_generator is False:
-            self.model.fit(x_train, y_train,
-                           epochs=self.epochs,
-                           batch_size=self.batch_size,
-                           shuffle=True,
-                           callbacks=self.callbacks_list,
-                           class_weight=self.class_weight,
-                           validation_data=(x_val, y_val)
-                           )
-
-        # Train on generated data batch-by-batch. Better for memory
-        else:
-            self.model.fit_generator(self.preprocess_dataset_generator(mode='training'),
-                                     steps_per_epoch=int(sum(self.n_training_samples.values())/self.batch_size),
-                                     epochs=self.epochs, verbose=1,
-                                     callbacks=self.callbacks_list,
-                                     validation_data=self.preprocess_dataset_generator(mode='validation'),
-                                     validation_steps=int(sum(self.n_validation_samples.values())/self.batch_size),
-                                     class_weight=None, max_queue_size=1,
-                                     # workers=2, use_multiprocessing=True,
-                                     shuffle=True, initial_epoch=0)
-
-    def test_model(self, x_test, y_test):
+    def test_model(self, mode='test_normal'):
         """
-        Method that manually performs testing on the validation set with a trained model
-        :param x_test: test data
-        :param y_test: test labels
+        Method that manually performs testing on the test set with a trained model.
+
+        mode = test_normal: Perform a test on one given set of weights specified in the config_file
+        mode = test_all: Test all the weights and return the top 5 best accuracy tests.
+        :param mode:
         :return:
         """
-        y_pred = []
-        y_true = []
 
-        # Sequential.predict_generator()
-        if self.use_generator is True:
-            # generate labels for the test set which is used to generate the test set.
+        if mode == 'test_all':
+            # Generate labels for the test set which is used to generate the test set.
             y_true = self.generate_labels()
-            prediction = self.model.predict_generator(self.generate_data_for_predict_generator(y_true),
-                                                      steps=int(sum(self.n_testing_samples.values())/self.batch_size)
+            accs = []
+            conf_matrices = []
+            steps = int(sum(self.n_testing_samples.values()) / self.batch_size_for_test)
+            # Loop through the saved weights
+            for file in tqdm(os.listdir('weights')):
 
+                # Load the model
+                model = load_model(f'weights/{file}')
+                y_pred = []
+
+                # Run predictions on the test folds
+                prediction = model.predict_generator(self.generate_data_for_predict_generator(y_true),
+                                                     steps=steps,
+                                                     )
+                # Decode from one-hot encoding
+                prediction = np.argmax(prediction, axis=1)
+                for pred in prediction:
+                    y_pred.append(self.classes[pred])
+
+                # Create confusion matrix calculate accuracy
+                matrix = confusion_matrix(y_true[:len(y_pred)], y_pred, self.classes)
+                accs.append(np.trace(matrix)/np.sum(matrix))
+                conf_matrices.append(matrix)
+
+                # Clear the session and prepare for a new model
+                backend.clear_session()
+
+            # Fetch the top best set of weights
+            indexes = np.argpartition(accs, -5)[-5:]
+            top_five_acc = np.array(accs)[indexes]
+            top_five_weights = np.array(os.listdir('weights'))[indexes]
+            top_five_matrix = np.array(conf_matrices)[indexes]
+
+            for acc, weight, matrix in zip(top_five_acc, top_five_weights, top_five_matrix):
+                print(weight)
+                print(acc)
+                print(self.classes)
+                print(matrix)
+
+        elif mode == 'test_normal':
+
+            model = load_model(self.load_model_path)
+            y_pred = []
+
+            # Generate labels for the test set which is used to generate the test set.
+            y_true = self.generate_labels()
+            prediction = model.predict_generator(self.generate_data_for_predict_generator(y_true),
+                                                      steps=int(sum(self.n_testing_samples.values()) / self.batch_size),
+                                                      verbose=1
                                                       )
             # Decode from one-hot encoding
             prediction = np.argmax(prediction, axis=1)
             for pred in prediction:
                 y_pred.append(self.classes[pred])
 
-        # Uses a pre-loaded data set
-        else:
-            # Loop through validation set
-            for sample, label in tqdm(zip(x_test, y_test)):
-                sample = np.resize(sample, (1,
-                                            sample.shape[0],
-                                            sample.shape[1],
-                                            sample.shape[2]))           # Resize sample to fit model
-                prediction = self.model.predict(sample)                 # Make a prediction
-
-                y_pred.append(self.classes[np.argmax(prediction)])      # Append the prediction to the list
-                y_true.append(self.classes[np.argmax(label)])
-
-        # Create confusion matrix calculate accuracy
-        matrix = confusion_matrix(y_true[:len(y_pred)], y_pred, self.classes)
-        accuracy = np.trace(matrix)/np.sum(matrix)
-        print("\n")
-        print(self.classes)
-        print(matrix)
-        print(accuracy)
-
-    def separate_loaded_data(self, nr_rolls=0):
-        """
-        When the UrbanSounds data is loaded, it will be loaded as a tuple of size 10.
-        Each tuple contains the array with all the features extracted from that fold.
-        This function concatenates the tuple into one large array.
-        :param y:
-        :param x:
-        :param nr_rolls: The number of rolls for the folds. 5 rolls will set fold nr 5 as validation. 2 Will set fold 8.
-        :return: x_train, y_train, x_test, y_test
-        """
-        # Load the features from a .npz file
-        x, y = load_and_extract_features(self.load_feature)
-
-        # Randomize the roll if set to True
-        if self.randomize_rolls is True:
-            nr_rolls = np.random.randint(0, len(x))
-            print(f"Validating on fold{(len(x)-nr_rolls)}")
-
-        self.validation_fold = (len(x)-nr_rolls)
-
-        # If nr_rolls is specified, rotate the data set
-        x = np.roll(x, nr_rolls, axis=0)
-        y = np.roll(y, nr_rolls, axis=0)
-
-        # Concatenate the array
-        x_train = np.concatenate(x[:-2], axis=0)
-        y_train = np.concatenate(y[:-2], axis=0)
-        x_val = x[-2]
-        y_val = y[-2]
-        x_test = x[-1]
-        y_test = y[-1]
-
-        return x_train, y_train, x_test, y_test, x_val, y_val
+            # Create confusion matrix calculate accuracy
+            matrix = confusion_matrix(y_true[:len(y_pred)], y_pred, self.classes)
+            accuracy = np.trace(matrix) / np.sum(matrix)
+            print("\n")
+            print(self.classes)
+            print(matrix)
+            print(accuracy)
 
 
 def run(audio_model):
@@ -237,57 +231,27 @@ def run(audio_model):
     :param audio_model:
     :return:
     """
-    # Randomly extract features to create a data set
-    if audio_model.network_mode == 'save_features':
-        if audio_model.random_extraction is True:
-            audio_model.preprocessing_dataset_randomly()
-        else:
-            audio_model.preprocess_dataset()
 
     # Train a network
-    elif audio_model.network_mode == 'train_network':
+    if audio_model.network_mode == 'train_network':
 
-        # 1. Use pre-created features
-        if audio_model.use_generator is False:
+        # Use generator for each batch. This option is more memory friendly
+        x_train, y_train = next(audio_model.preprocess_dataset_generator(mode='training'))
 
-            # Create train and validation split
-            x_train, y_train, _, _, x_val, y_val = audio_model.separate_loaded_data(nr_rolls=audio_model.fold)
+        # Compile model
+        audio_model.set_up_model(x_train, y_train)
 
-            # Compile model
-            audio_model.set_up_model(x_train, y_train)
+        # Compute class weight
+        audio_model.compute_class_weight(y_train)
 
-            # Compute class weight
-            audio_model.compute_class_weight(y_train)
-
-            # Train network
-            audio_model.train(x_train, y_train, x_val, y_val)
-
-        # 2. Or use generator for each batch. This option is more memory friendly
-        else:
-            x_train, y_train = next(audio_model.preprocess_dataset_generator(mode='training'))
-
-            # Compile model
-            audio_model.set_up_model(x_train, y_train)
-
-            # Compute class weight
-            audio_model.compute_class_weight(y_train)
-
-            # Train network
-            audio_model.train(None, None, None, None)
+        # Train network
+        audio_model.train()
 
     # Test a network
     elif audio_model.network_mode == 'test_network':
 
-        # Load data set if not using the generator
-        if audio_model.use_generator is not True:
-            # Create train and validation split
-            _, _, x_test, y_test, _, _ = audio_model.separate_loaded_data(nr_rolls=audio_model.fold)
-
-        # Compile model
-        audio_model.set_up_model(None, None)
-
         # Test network
-        audio_model.test_model(None, None)
+        audio_model.test_model(audio_model.test_mode)
 
     else:
         raise ValueError('Choose a valid Mode')

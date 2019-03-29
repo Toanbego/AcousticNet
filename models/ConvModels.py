@@ -109,6 +109,59 @@ def novel_cnn(input_shape, num_classes, optimizer):
     return model
 
 
+def novel_cnn_with_bn(input_shape, num_classes, optimizer):
+    """
+    A novel convolutional model network
+    :return:
+    """
+    model = Sequential()
+
+    # CNN - 2 - Conv
+    model.add(Conv2D(16, 5, strides=5,
+                     padding='same',
+                     kernel_regularizer=l2(0.001),
+                     input_shape=input_shape
+                     ))
+    model.add(LeakyReLU())
+
+    # CNN - 2 - Conv
+    model.add(Conv2D(32, 3, strides=3,
+                     kernel_regularizer=l2(0.001),
+                     padding='same'))
+    model.add(LeakyReLU())
+
+    # CNN - 3 - Conv
+    model.add(Conv2D(64, 2, strides=2,
+                     kernel_regularizer=l2(0.001),
+                     padding='same', ))
+    model.add(LeakyReLU())
+
+    # CNN - 4 - Conv
+    model.add(Conv2D(128, (1, 1), strides=(1, 1),
+                     kernel_regularizer=l2(0.001),
+                     padding='same', ))
+    model.add(LeakyReLU())
+    model.add(BatchNormalization())
+
+    model.add(Dropout(0.3))
+
+    # CNN - 4 - FCC
+    model.add(Flatten())
+    model.add(Dense(64))
+    model.add(LeakyReLU())
+
+    # CNN - 5 Output
+    model.add(Dense(num_classes, activation='softmax'))
+
+    # Print summary and compile model
+    model.summary()
+    model.compile(loss='categorical_crossentropy',
+                  optimizer=optimizer,
+                  metrics=['acc'])
+
+    return model
+
+
 def novel_cnn_small_kernels(input_shape, num_classes, optimizer):
     """
     A novel convolutional model network
@@ -117,7 +170,7 @@ def novel_cnn_small_kernels(input_shape, num_classes, optimizer):
     model = Sequential()
 
     # CNN - 2 - Conv
-    model.add(Conv2D(16, 1, strides=5,
+    model.add(Conv2D(16, 1, strides=1,
                      padding='same',
                      kernel_regularizer=l2(0.001),
                      input_shape=input_shape
@@ -125,13 +178,13 @@ def novel_cnn_small_kernels(input_shape, num_classes, optimizer):
     model.add(LeakyReLU())
     model.add(MaxPool2D(2, 2))
     # CNN - 2 - Conv
-    model.add(Conv2D(32, 1, strides=3,
+    model.add(Conv2D(32, 1, strides=1,
                      kernel_regularizer=l2(0.001),
                      padding='same'))
     model.add(LeakyReLU())
 
     # CNN - 3 - Conv
-    model.add(Conv2D(64, 1, strides=2,
+    model.add(Conv2D(64, 1, strides=1,
                      kernel_regularizer=l2(0.001),
                      padding='same', ))
     model.add(LeakyReLU())
@@ -142,6 +195,59 @@ def novel_cnn_small_kernels(input_shape, num_classes, optimizer):
                      padding='same', ))
     model.add(LeakyReLU())
 
+    model.add(Dropout(0.5))
+
+    # CNN - 4 - FCC
+    model.add(Flatten())
+    model.add(Dense(64))
+    model.add(LeakyReLU())
+
+    # CNN - 5 Output
+    model.add(Dense(num_classes, activation='softmax'))
+
+    # Print summary and compile model
+    model.summary()
+    model.compile(loss='categorical_crossentropy',
+                  optimizer=optimizer,
+                  metrics=['acc'])
+
+    return model
+
+
+def novel_cnn_small_kernels(input_shape, num_classes, optimizer):
+    """
+    A novel convolutional model network
+    :return:
+    """
+    model = Sequential()
+
+    # CNN - 2 - Conv
+    model.add(Conv2D(16, 1, strides=1,
+                     padding='same',
+                     kernel_regularizer=l2(0.001),
+                     input_shape=input_shape
+                     ))
+    model.add(LeakyReLU())
+    model.add(MaxPool2D(2, 2))
+
+    # CNN - 2 - Conv
+    model.add(Conv2D(32, 1, strides=1,
+                     kernel_regularizer=l2(0.001),
+                     padding='same'))
+    model.add(LeakyReLU())
+
+    # CNN - 3 - Conv
+    model.add(Conv2D(64, 1, strides=1,
+                     kernel_regularizer=l2(0.001),
+                     padding='same', ))
+    model.add(LeakyReLU())
+
+    # CNN - 4 - Conv
+    model.add(Conv2D(128, 1, strides=1,
+                     kernel_regularizer=l2(0.001),
+                     padding='same', ))
+    model.add(LeakyReLU())
+    model.add(MaxPool2D(2, 2))
     model.add(Dropout(0.5))
 
     # CNN - 4 - FCC
@@ -221,6 +327,27 @@ def bigger_net(input_shape, num_classes, optimizer):
     return model
 
 
-if __name__ == '__main__':
+def fetch_network(network_name, input_shape, num_classes, optimizer):
+    """
+    Returns the correct network based on the network name input
+    :param optimizer:
+    :param num_classes:
+    :param input_shape:
+    :param network_name:
+    :return:
+    """
+    if network_name == 'novel_net':
+        return novel_cnn(input_shape, num_classes, optimizer)
+    elif network_name == 'novel_net_small_kernels':
+        return novel_cnn_small_kernels(input_shape, num_classes, optimizer)
+    elif network_name == 'bigger_net':
+        return bigger_net(input_shape, num_classes, optimizer)
+    elif network_name == 'novel_cnn_bn':
+        return novel_cnn_with_bn(input_shape, num_classes, optimizer)
 
+
+if __name__ == '__main__':
+    """
+    Just used for testing purposes
+    """
     model = urban_sound_net(input_shape=(128, 128, 1), num_classes=2, optimizer='adam')

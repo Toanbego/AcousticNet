@@ -26,3 +26,4 @@ $RECYCLE.BIN/
 **weights/
 **usounds_features/
 **logs/
+weights*.hdf5
