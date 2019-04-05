@@ -4,7 +4,8 @@ import configparser
 import pandas as pd
 import numpy as np
 import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+import re
+
 
 # ML libraries
 from sklearn.metrics import confusion_matrix
@@ -42,8 +43,15 @@ class LearningRateHistory(keras.callbacks.Callback):
     """
     Callback object that prints the learning rate
     """
+    def __init__(self, data_aug):
+        super().__init__()
+        self.data_aug = data_aug
+
     def on_epoch_end(self, epoch, logs=None):
-        print(eval(self.model.optimizer.lr))
+        # aug_dat = self.data_aug['downsampledd'] / self.data_aug.values().sum()
+        # norm_dat = self.data_aug['normal'] / self.data_aug.values().sum()
+        # print(f'downsampledd data: {aug_dat}, normal data: {norm_dat}')
+        print(self.data_aug)
 
 
 class TrainAudioClassificator(PreprocessData):
@@ -61,6 +69,10 @@ class TrainAudioClassificator(PreprocessData):
         self.fold = config['model'].getint('fold')
         self.epochs = config['model'].getint('epochs')
         self.batch_size = config['model'].getint('batch_size')
+        assert self.batch_size >= 1+len(self.time_shift_param)+len(self.pitch_shift_param), \
+            f'batch_size must be bigger than {1+len(self.time_shift_param)+len(self.pitch_shift_param)} because' \
+            f'data augmentation is used'
+
         self.batch_size_for_test = 4
         self.learning_rate = config['model'].getfloat('learning_rate')
         self.fold = config['model'].getint('fold')
@@ -103,17 +115,18 @@ class TrainAudioClassificator(PreprocessData):
         Methods compiles the specified model. Currently only CNN is available.
         :return:
         """
-        # Load weights if activated
-        if self.load_weights is True or self.network_mode == 'train_network':
+
+        # Load a predefined network
+        if self.load_weights is True:
+            self.model = load_model(self.load_model_path)
+            self.model.summary()
+
+        # Define input shape and compile model
+        else:
             num_classes = y.shape[1]
             input_shape = (x.shape[1], x.shape[2], 1)
             self.model = CNN.fetch_network(self.network_architecture,
                                            input_shape, num_classes, self.optimizer)
-
-        # Define input shape and compile model
-        elif self.load_weights is True:
-            self.model = load_model(self.load_model_path)
-            self.model.summary()
 
         # Set up tensorboard and checkpoint monitoring
         tb_callbacks = TensorBoard(log_dir='./logs', histogram_freq=0, batch_size=self.batch_size, write_graph=True,
@@ -129,7 +142,8 @@ class TrainAudioClassificator(PreprocessData):
                                      save_weights_only=False,
                                      mode='auto',
                                      period=1)
-        self.callbacks_list = [checkpoint, tb_callbacks, LearningRateHistory()]
+        # check = LearningRateHistory(self.data_aug)
+        self.callbacks_list = [checkpoint, tb_callbacks]#, check]
 
     def train(self):
         """
@@ -137,16 +151,16 @@ class TrainAudioClassificator(PreprocessData):
         :return:
         """
         # Train on data extracted
-        keras.Sequential.fit_generator()
         self.model.fit_generator(self.preprocess_dataset_generator(mode='training'),
-                                 steps_per_epoch=int(sum(self.n_training_samples.values())/self.batch_size),
+                                 steps_per_epoch=10,
+                                 # steps_per_epoch=int(sum(self.n_training_samples.values())/self.batch_size),
                                  epochs=self.epochs, verbose=1,
                                  callbacks=self.callbacks_list,
                                  validation_data=self.preprocess_dataset_generator(mode='validation'),
                                  validation_steps=int(sum(self.n_validation_samples.values())/self.batch_size),
                                  class_weight=None, max_queue_size=3,
                                  # workers=2, use_multiprocessing=True,
-                                 shuffle=True, initial_epoch=60)
+                                 shuffle=True, initial_epoch=0)
 
     def test_model(self, mode='test_normal'):
         """
@@ -201,16 +215,16 @@ class TrainAudioClassificator(PreprocessData):
                 print(matrix)
 
         elif mode == 'test_normal':
-
+            # Load the model
             model = load_model(self.load_model_path)
             y_pred = []
 
             # Generate labels for the test set which is used to generate the test set.
             y_true = self.generate_labels()
             prediction = model.predict_generator(self.generate_data_for_predict_generator(y_true),
-                                                      steps=int(sum(self.n_testing_samples.values()) / self.batch_size),
-                                                      verbose=1
-                                                      )
+                                                 steps=int(sum(self.n_testing_samples.values()) / self.batch_size),
+                                                 verbose=1
+                                                 )
             # Decode from one-hot encoding
             prediction = np.argmax(prediction, axis=1)
             for pred in prediction:
@@ -277,7 +291,7 @@ def main():
     """
 
     # Read csv for UrbanSounds
-    df = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_length_NewTest.csv')
+    df = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_length_augmented.csv')
 
     # Initialize class
     audio_model = TrainAudioClassificator(df)

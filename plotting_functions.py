@@ -57,10 +57,10 @@ def plot_signals(signals, channel='stereo'):
 
 def plot_fft(fft, channel='stereo'):
     """
-	Plots the fast-fourier-transform
-	:param fft:
-	:return:
-	"""
+    Plots the fast-fourier-transform
+    :param fft:
+    :return:
+    """
     fig, axes = plt.subplots(nrows=2, ncols=5, sharex=False,
                              sharey=True, figsize=(20, 5))
     fig.suptitle('Fourier Transforms CLEAN', size=16)
