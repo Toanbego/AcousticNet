@@ -8,42 +8,41 @@ Preprocessing script for all your preprocessing needs
 
 # Signal processing libraries
 
-import pywt
+# import pywt
 import resampy
 import librosa
-import muda
-import jams
+# import muda
+# import jams
 from scipy.io import wavfile
 import soundfile as sf
-import sklearn
-import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-
+# import sklearn
+# import os
+# os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+import cv2
+import math
 import pyrubberband as pyrb
 from python_speech_features import mfcc, logfbank, fbank, sigproc, delta, get_filterbanks
-from python_speech_features import sigproc
+# from python_speech_features import sigproc
 from scipy.signal import spectrogram, get_window
-# import obspy
-# from obspy.imaging.cm import obspy_sequential
-# from obspy.signal.tf_misfit import cwt
-from scipy.signal import wavelets
-import scipy.signal as sig
-
+# from numba import jit
+# from scipy.signal import wavelets
+# import scipy.signal as sig
+import pandas as pd
+from tqdm import tqdm
 
 # Standard libraries
-import pandas as pd
 
-from tqdm import tqdm
 import numpy as np
 from matplotlib import pyplot as plt
 import configparser
-from keras.utils import to_categorical
+# from keras.utils import to_categorical
 
 # Parse the config.ini file
 config = configparser.ConfigParser()
 config.read("config.ini")
 import os
 import re
+
 
 def i_screwed_up_and_need_to_rename_all_my_files(df):
     """
@@ -115,11 +114,18 @@ def add_length_to_column(df):
     df.set_index('slice_file_name', inplace=True)
 
     # Loop through audio files and check the length of the file
-    for f, fold in tqdm(zip(df.index, df.fold)):
-        signal, rate = sf.read(f'../Datasets/audio/augmented/fold{fold}/{f}')
-        df.at[f, 'length'] = signal.shape[0] / rate
+    for f in tqdm(df.index):
+        # signal, rate = sf.read(f'../Datasets/audio/augmented/fold{fold}/{f}')
+        param = re.findall('_(.*)_shift_(.*).wav', f)
+        if param:
+            param = list(param[0])
+            df.at[f, 'param'] = param[1]
+            df.at[f, 'augmentation'] = param[0]
+        if not param:
+            df.at[f, 'param'] = float('NaN')
 
-    df.to_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_length_augmented.csv')
+    df.to_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_augmented.csv')
+    exit()
     return df
 
 
@@ -137,6 +143,163 @@ def calc_fft(y, rate):
     return magnitude, freq
 
 
+
+def cwt(data, wavelet_name, sampling_frequency=1.):
+    """
+    cwt(data, scales, wavelet)
+    One dimensional Continuous Wavelet Transform.
+    Parameters
+    ----------
+    data : array_like
+        Input signal
+    wavelet_name : Wavelet object or name
+        Wavelet to use. Currently, only the Morlet wavelet is supported ('morl').
+    sampling_frequency : float
+        Sampling frequency for frequencies output (optional)
+    Returns
+    -------
+    coefs : array_like
+        Continous wavelet transform of the input signal for the given scales
+        and wavelet
+    frequencies : array_like
+        if the unit of sampling period are seconds and given, than frequencies
+        are in hertz. Otherwise Sampling period of 1 is assumed.
+    Notes
+    -----
+    Size of coefficients arrays is automatically calculated given the wavelet and the data length. Currently, only the
+    Morlet wavelet is supported.
+    Examples
+    --------
+    fs = 1e3
+    t = np.linspace(0, 1, fs+1, endpoint=True)
+    x = np.cos(2*np.pi*32*t) * np.logical_and(t >= 0.1, t < 0.3) + np.sin(2*np.pi*64*t) * (t > 0.7)
+    wgnNoise = 0.05 * np.random.standard_normal(t.shape)
+    x += wgnNoise
+    c, f = cwt.cwt(x, 'morl', sampling_frequency=fs, plot_scalogram=True)
+    """
+
+    # Currently only supported for Morlet wavelets
+    if wavelet_name == 'morl':
+        data -= np.mean(data)
+        n_orig = data.size
+        nv = 10
+        ds = 1 / nv
+        fs = sampling_frequency
+        dt = 1 / fs
+
+        # Pad data symmetrically
+        padvalue = n_orig // 2
+        x = np.concatenate((np.flipud(data[0:padvalue]), data, np.flipud(data[-padvalue:])))
+        n = x.size
+
+        # Define scales
+        _, _, wavscales = getDefaultScales(wavelet_name, n_orig, ds)
+        num_scales = wavscales.size
+
+        # Frequency vector sampling the Fourier transform of the wavelet
+        omega = np.arange(1, math.floor(n / 2) + 1, dtype=np.float64)
+        omega *= (2 * np.pi) / n
+        omega = np.concatenate((np.array([0]), omega, -omega[np.arange(math.floor((n - 1) / 2), 0, -1, dtype=int) - 1]))
+
+        # Compute FFT of the (padded) time series
+        f = np.fft.fft(x)
+
+        # Loop through all the scales and compute wavelet Fourier transform
+        psift, freq = waveft(wavelet_name, omega, wavscales)
+        # psi = pywt.in
+        # Inverse transform to obtain the wavelet coefficients.
+        cwtcfs = np.fft.ifft(np.kron(np.ones([num_scales, 1]), f) * psift)
+        cfs = cwtcfs[:, padvalue:padvalue + n_orig]
+        freq = freq * fs
+
+        return cfs, freq
+    else:
+        raise Exception
+
+# @jit(nopython=True)
+def getDefaultScales(wavelet, n, ds):
+    """
+    getDefaultScales(wavelet, n, ds)
+    Calculate default scales given a wavelet and a signal length.
+    Parameters
+    ----------
+    wavelet : string
+        Name of wavelet
+    n : int
+        Number of samples in a given signal
+    ds : float
+        Scale resolution (inverse of number of voices in octave)
+    Returns
+    -------
+    s0 : int
+        Smallest useful scale
+    ds : float
+        Scale resolution (inverse of number of voices in octave). Here for legacy reasons; implementing more wavelets
+        will need this output.
+    scales : array_like
+        Array containing default scales.
+    """
+    wname = wavelet
+    nv = 1 / ds
+
+    if wname == 'morl':
+
+        # Smallest useful scale (default 2 for Morlet)
+        s0 = 2
+
+        # Determine longest useful scale for wavelet
+        max_scale = n // (np.sqrt(2) * s0)
+        if max_scale <= 1:
+            max_scale = n // 2
+        max_scale = np.floor(nv * np.log2(max_scale))
+        a0 = 2 ** ds
+        scales = s0 * a0 ** np.arange(0, max_scale + 1)
+    else:
+        raise Exception
+
+    return s0, ds, scales
+
+# @jit(nopython=True)
+def waveft(wavelet, omega, scales):
+    """
+    waveft(wavelet, omega, scales)
+    Computes the Fourier transform of a wavelet at certain scales.
+    Parameters
+    ----------
+    wavelet : string
+        Name of wavelet
+    omega : array_like
+        Array containing frequency values in Hz at which the transform is evaluated.
+    scales : array_like
+        Vector containing the scales used for the wavelet analysis.
+    Returns
+    -------
+    wft : array_like
+        (num_scales x num_freq) Array containing the wavelet Fourier transform
+    freq : array_like
+        Array containing frequency values
+    """
+    wname = wavelet
+    num_freq = omega.size
+    num_scales = scales.size
+    wft = np.zeros([num_scales, num_freq])
+
+    if wname == 'morl':
+        gC = 6
+        mul = 2
+        for jj, scale in enumerate(scales):
+            expnt = -(scale * omega - gC) ** 2 / 2 * (omega > 0)
+            wft[jj, ] = mul * np.exp(expnt) * (omega > 0)
+
+        fourier_factor = gC / (2 * np.pi)
+        frequencies = fourier_factor / scales
+
+    else:
+        raise Exception
+
+    return wft, frequencies
+
+
 class PreprocessData:
 
     def __init__(self, df):
@@ -147,7 +310,7 @@ class PreprocessData:
             # 'air_conditioner',
             # 'engine_idling',
             'siren',
-            'street_music',
+            # 'street_music',
             # 'drilling',
             'jackhammer',
             # 'dog_bark',
@@ -155,9 +318,17 @@ class PreprocessData:
             # 'car_horn'
         ]
 
-        # DataFrame
-        self.df = df.loc[df['length'] >= config['preprocessing'].getfloat('signal_minimum_length')]
-        self.df = self.df.reset_index()
+
+        # Augmentation parameters
+        self.augmentations = config['augmentation']['augmentations']
+        self.pitch_shift = config['augmentation'].getboolean('pitch_shift')
+        self.time_shift = config['augmentation'].getboolean('time_shift')
+        self.time_shift_param = list(map(float, config['augmentation']['time_shift_param'].split(',')))
+        self.pitch_shift_param = list(map(float, config['augmentation']['pitch_shift_param'].split(',')))
+
+        # Read and filter dataframes
+        df_v = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_length_NewTest.csv')
+        self.df, self.df_v = self.filter_dataframe(df, df_v)
 
         # Audio parameters
         self.randomize_rolls = config['preprocessing'].getboolean('randomize_roll')
@@ -180,28 +351,95 @@ class PreprocessData:
         self.threshold = config['preprocessing'].getfloat('threshold')
         self.audio_folder = config['preprocessing']['audio_folder']
 
-        # Augmentation parameters
-        self.augmentations = config['augmentation']['augmentations'].split(',')
-        # self.augmentations.append('None')
-        self.pitch_shift = config['augmentation'].getboolean('pitch_shift')
-        self.time_shift = config['augmentation'].getboolean('time_shift')
-        self.time_shift_param = list(map(float, config['augmentation']['time_shift_param'].split(',')))
-        self.pitch_shift_param = list(map(float, config['augmentation']['pitch_shift_param'].split(',')))
-        # self.data_aug = {'downsampledd': 0, 'normal': 0}
-
         # Find the number of possible samples from each of the folds for training, validation and testing
-        self.n_training_samples = self.find_samples_per_epoch(start_fold=1, end_fold=9)
-        self.n_validation_samples = self.find_samples_per_epoch(start_fold=9, end_fold=10)
-        self.n_testing_samples = self.find_samples_per_epoch(start_fold=10, end_fold=11)
+        self.n_training_samples = self.find_samples_per_epoch(self.df, start_fold=1, end_fold=8)
+        self.n_validation_samples = self.find_samples_per_epoch(self.df_v, start_fold=9, end_fold=9)
+        self.n_testing_samples = self.find_samples_per_epoch(self.df_v, start_fold=10, end_fold=10)
         self.training_seed, self.validation_seed = np.random.randint(0, 100000, 2)
         self.testing_seed = 42
-
+        self.scales = np.arange(1, 151)
         # Use the sample numbers to create probability distribution for the labels
         self.class_dist = [self.n_training_samples[classes] / sum(self.n_training_samples.values())
                            for classes in self.classes]
         self.prob_dist = pd.Series(self.class_dist, self.classes)
 
         self.validation_fold = None
+
+    def filter_dataframe(self, df, df_v):
+        """
+        Filters out the dataframe based on the specifications from the config file
+        :return:
+        """
+
+        # Filter out short audio
+        df = df.loc[df['length'] >= config['preprocessing'].getfloat('signal_minimum_length')]
+        df_v = df_v.loc[df_v['length'] >= config['preprocessing'].getfloat('signal_minimum_length')]
+
+        # Filter out unused params
+        total_of_params = self.time_shift_param
+        total_of_params.extend(self.pitch_shift_param)
+        total_of_params.append(float('NaN'))
+        df = df[df.param.isin(total_of_params)]
+
+        # Filter out augmentation
+        if 'time_shift' not in self.augmentations:
+            df = df[df.augmentation != 'time']
+        if 'pitch_shift' not in self.augmentations:
+            df = df[df.augmentation != 'pitch']
+
+        # Reset the indexes
+        df = df.reset_index()
+        df_v = df_v.reset_index()
+
+        return df, df_v
+
+    def select_random_audio_clip(self, sample, seed=None):
+        """
+        Selects a part of the audio file at random. length of clip is defined by self.step
+        :return:
+        """
+        if seed is None:
+            rand_index = np.random.randint(0, sample.shape[0] - self.sample_length)
+        else:
+            np.random.seed(seed)
+            rand_index = np.random.randint(0, sample.shape[0] - self.sample_length)
+        return sample[rand_index:rand_index + self.sample_length]
+
+    def find_samples_per_epoch(self, df, start_fold=1, end_fold=9):
+        """
+        Finds all the files that exist in the data set for a particular class.
+        It then checks the defined step length and checks how many possible samples that
+        that can be extracted for the class.
+
+        Example:    If the audio file is 4s and the step length is set to 0.5s then the number of possible samples
+                    is 8. If a class has 16 audio files of 4s then the number of possible samples is a total of
+                    4s/0.5s * 16 files = 128 samples
+
+        :param df: dataframe to use
+        :param start_fold: Start fold to start checking from
+        :param end_fold: The last fold to check. Function checks all folds in between
+        :return:
+        """
+        samples_dict = {}
+
+        # Loop through folds
+        for f in range(start_fold, end_fold+1):
+
+            # Find all the files in the fold
+            files_in_fold = df[df.fold == f]
+
+            for label in self.classes:
+                # Find all the matches of that class in the fold
+                files_with_class = files_in_fold[df.label == label]
+
+                # Add up the possible samples
+                if label in samples_dict.keys():
+                    samples_dict[label] += int(files_with_class['length'].sum() / self.step_length)
+                else:
+                    samples_dict[label] = int(files_with_class['length'].sum() / self.step_length)
+
+        return samples_dict
+
 
     def extract_feature(self, sample, rate, feature_to_extract='mfcc',
                         activate_threshold=False, seed=None, delta_delta=False, random_extraction=True):
@@ -243,6 +481,7 @@ class PreprocessData:
 
         # Extract the log mel frequency filter banks
         elif feature_to_extract == 'logfbank':
+            sample = sample[:16000*3]
             sample_hat = logfbank(sample, rate,
                                   nfilt=self.n_filt,
                                   nfft=self.n_fft).T
@@ -261,28 +500,52 @@ class PreprocessData:
             sample_hat = np.where(Sxx == 0, np.finfo(float).eps, Sxx)
             sample_hat = np.log(sample_hat)
 
-
+        # Extract the wavelet transform of the signal at different scales
         elif feature_to_extract == 'scalogram':
-            morlet_transform = pywt.ContinuousWavelet('morl')
 
-            center_freq = pywt.scale2frequency(morlet_transform, 1)
-            print(center_freq)
-            print(center_freq/rate)
-            filterbanks = get_filterbanks(4, self.n_fft, rate)
+            sample = sample[:16000]
+            # scales = np.arange(1, 151)
 
-            # frames = sigproc.framesig(signal, 0.025 * rate, 0.01 * rate, lambda x: np.ones((x,)))
 
-            morlet_transform = pywt.ContinuousWavelet('morl')
+            # # Wavelet transform
 
-            sample_hat, freqs = pywt.cwt(sample, scales=np.arange(1, 50), wavelet=morlet_transform)
+            n_orig = sample.size
+            nv = 8
+            ds = 1 / nv
 
-            # sample_hat = sigproc.framesig(sample_hat, 0.025 * rate, 0.01 * rate, lambda x: np.ones((x,)))
-            plt.imshow(sample_hat, cmap='hot', aspect='auto', #extent=[-1, 1, 1, 31],
-                       vmax=abs(sample_hat).max(), vmin=-abs(sample_hat).max()
-                       )
-            plt.show()
+            _, _, scales = getDefaultScales('morl', n_orig, ds)
 
-            exit()
+            #
+            # t7 = time.time()
+            # sample_hat, freqs = pywt.cwt(sample, self.scales, 'morl', 1)
+            # t8 = time.time()
+            # print("pywt: " + str(t8 - t7))
+
+            # Reshape the signal
+            t5 = time.time()
+            sample_hat, fs = cwt(sample, 'morl')
+            t6 = time.time()
+            print("homemade: " + str(t6 - t5))
+            sample_hat = np.abs(sample_hat)
+
+            width = 500
+            height = sample_hat.shape[0]
+            dim = (width, height)
+            sample_hat = cv2.resize(sample_hat, dim, interpolation=cv2.INTER_AREA)
+
+            # plt.imshow(sample_hat)
+            # plt.title(f'{str(len(scales))} - Normal')
+            # plt.semilogy()
+            # plt.imshow(sample_hat)
+            # plt.show()
+            # exit()
+            # plt.title(f'{str(len(scales))} - resized')
+            # plt.imshow(sample_hat, aspect='auto',
+            #            vmax=abs(sample_hat).max(), vmin=-abs(sample_hat).max()
+            #            )
+            # plt.show()
+            # exit()
+
 
         else:
             raise ValueError('Please choose an existing feature in the config.ini file:'
@@ -298,56 +561,6 @@ class PreprocessData:
             sample_hat = np.append(sample_hat.T, d, axis=0)
 
         return sample_hat
-
-    def select_random_audio_clip(self, sample, seed=None):
-        """
-        Selects a part of the audio file at random. length of clip is defined by self.step
-        :return:
-        """
-        if seed is None:
-            rand_index = np.random.randint(0, sample.shape[0] - self.sample_length)
-        else:
-            np.random.seed(seed)
-            rand_index = np.random.randint(0, sample.shape[0] - self.sample_length)
-        return sample[rand_index:rand_index + self.sample_length]
-
-    def find_samples_per_epoch(self, start_fold=1, end_fold=9):
-        """
-        Finds all the files that exist in the data set for a particular class.
-        It then checks the defined step length and checks how many possible samples that
-        that can be extracted for the class.
-
-        Example:    If the audio file is 4s and the step length is set to 0.5s then the number of possible samples
-                    is 8. If a class has 16 audio files of 4s then the number of possible samples is a total of
-                    4s/0.5s * 16 files = 128 samples
-
-        :param start_fold: Start fold to start checking from
-        :param end_fold: The last fold to check. Function checks all folds in between
-        :return:
-        """
-        samples_dict = {}
-
-        # Loop through folds
-        for f in range(start_fold, end_fold):
-
-            # Find all the files in the fold
-            files_in_fold = self.df[self.df.fold == f]
-
-            for label in self.classes:
-                # Find all the matches of that class in the fold
-                files_with_class = files_in_fold[self.df.label == label]
-
-                # Add up the possible samples
-                if label in samples_dict.keys():
-                    samples_dict[label] += int(files_with_class['length'].sum() / self.step_length)
-                else:
-                    samples_dict[label] = int(files_with_class['length'].sum() / self.step_length)
-                    if self.pitch_shift is True:
-                        samples_dict[label] *= len(self.pitch_shift_param)
-                    if self.time_shift is True:
-                        samples_dict[label] *= len(self.time_shift_param)
-
-        return samples_dict
 
     def generate_labels(self, seed=42):
         """
@@ -379,7 +592,7 @@ class PreprocessData:
         _min, _max = float('inf'), -float('inf')
 
         # The folds to loop through and which is the test fold
-        folds = np.unique(self.df['fold'])
+        folds = np.unique(self.df_v['fold'])
         folds = np.roll(folds, folds[-1] - self.fold)
         testing_folds = folds[-1]
 
@@ -392,14 +605,14 @@ class PreprocessData:
             x = []  # Set up lists
 
             # Find the files in the current fold
-            files_in_fold = self.df.loc[self.df.fold == testing_folds]
+            files_in_fold = self.df_v.loc[self.df_v.fold == testing_folds]
 
             # Loop through the files in the fold and create a batch
             for i in range(self.batch_size_for_test):
                 label = labels_to_predict[n+i]
 
                 # Pick a random file with that class
-                file = np.random.choice(files_in_fold[self.df.label == label].slice_file_name)
+                file = np.random.choice(files_in_fold[self.df_v.label == label].slice_file_name)
                 file_path = f'../Datasets/audio/{self.audio_folder}/fold{testing_folds}/{file}'
 
                 # Read file
@@ -428,7 +641,7 @@ class PreprocessData:
             x = (x - _min) / (_max - _min)  # Normalize x and y
             x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 1)  # Reshape all to same size
 
-            n +=  self.batch_size_for_test
+            n += self.batch_size_for_test
             yield x
 
     def preprocess_dataset_generator(self, mode='training'):
@@ -463,7 +676,12 @@ class PreprocessData:
             x, y = [], []  # Set up lists
 
             # Find the files in the current fold
-            files_in_fold = self.df.loc[self.df.fold == fold]
+            if mode == 'training':
+                files_in_fold = self.df.loc[self.df.fold == fold]
+
+            elif mode == 'validation':
+                files_in_fold = self.df_v.loc[self.df_v.fold == fold]
+
             # Counter that checks if batch_size is reached
             counter = 0
             # Loop through the files in the fold and create a batch
@@ -476,11 +694,8 @@ class PreprocessData:
 
                 # Read file
                 sample, rate = sf.read(file_path)
-
-                # Apply random augmentation
-                if mode == 'training':
-                    sample = self.deform_signal(sample, rate)
-
+                sample = self.resample_signal(sample, rate, self.rate)
+                rate = self.rate
                 # Extract feature from signal
                 x_sample = self.extract_feature(sample, rate,
                                                 feature_to_extract=self.feature,
@@ -590,7 +805,6 @@ class PreprocessData:
         # 4 - step
         return np.ascontiguousarray(y_hat)
 
-
     def downsample_all_signals(self, df, target_sr=16000):
         """
         Loops through all the sound files and applies a high pass filter
@@ -690,12 +904,13 @@ if __name__ == '__main__':
     """
 
     # Create dataframe
-    df = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_length_NewTest.csv')
+    df = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_augmented.csv')
+
     # Create a class distribution
     class_dist = df.groupby(['label'])['length'].mean()
 
     preprocessing = PreprocessData(df)
-    preprocessing.downsample_all_signals(df, target_sr=16000)
+
     # Fetch the classes from the CSV file
     classes = list(np.unique(df.label))
 
@@ -712,37 +927,58 @@ if __name__ == '__main__':
     Sxx = {}
 
     c = 'gun_shot'
-    wav_file = df[df.label == c].iloc[0, 0]
-    fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
-    target_sr = 16000
-
-    preprocessing.deform_signal(f'../Datasets/audio/downsampled/fold{fold}/{wav_file}', deformation='time_shift')
-
-
-
-
-    exit()
-
-    classes = ['siren', 'jackhammer']
+    import time
+    classes = ['siren', 'gun_shot', 'jackhammer']
+    # freqs = pywt.scale2frequency('morl', scale=preprocessing.scales, precision=12)
 
     for c in classes:
         # Get the file name and the fold it exists in from the dataframe
         wav_file = df[df.label == c].iloc[0, 0]
         fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
         target_sr = 16000
-        # Read signal and add it to dict. UrbanSound uses stereo which is made mono
+
+        # Read signal and add it to dict.
         signal, sr = sf.read(f'../Datasets/audio/original/fold{fold}/{wav_file}')
-        signal = preprocessing.make_signal_mono(signal)
-        signal, sr = preprocessing.resample_signal(signal, orig_sr=sr, target_sr=target_sr)
+        # signal = preprocessing.make_signal_mono(signal)
+        # signal = preprocessing.resample_signal(signal, sr, preprocessing.rate)
+        # sr = preprocessing.rate
+        # signal = preprocessing.resample_signal(signal, orig_sr=sr, target_sr=target_sr)
+        # t1 = time.time()
+        # feature = preprocessing.extract_feature(signal, sr, 'scalogram', random_extraction=False)
+        # t2 = time.time()
+        # plt.title('Scalogram - '+c, size=20)
+        # plt.xlabel('Time', size=15)
+        # plt.ylabel('Scales/Frequency', size=15)
+        # plt.semilogy()
+        # plt.imshow(feature)
+        # plt.show()
+        # t3 = time.time()
+        # feature = preprocessing.extract_feature(signal, sr, 'spectogram', random_extraction=False)
+        # t4 = time.time()
+        #
+        # # print("Scalogram: "+str(t2-t1),"Spectogram: "+str(t4-t3))
+        # plt.title('Spectogram - '+c, size=20)
+        # # plt.semilogy()
+        # plt.xlabel('Time', size=15)
+        # plt.ylabel('Frequency', size=15)
+        # plt.imshow(feature)
+        # plt.show()
+        feature = preprocessing.extract_feature(signal, sr, 'logfbank', random_extraction=False)
+        plt.title('Log Filter bank - ' + c, size=15)
+        plt.xlabel('Time', size=15)
+        plt.ylabel('Filter banks', size=15)
+        # plt.semilogy()
+        plt.imshow(feature, cmap='hot', interpolation='nearest')
 
-        signals[c], fft[c], logfbank_low_no_mask[c], mfccs_low_no_mask[c] = extract_features(signal, target_sr,
-                                                                               win_func=lambda x: np.hamming(x, ),
-                                                                               clean=False,
-                                                                               fft=True,
-                                                                               filterbank=True,
-                                                                               mffc=True,
-                                                                               dynamic_threshold=False)
-
+        plt.show()
+        #
+        # feature = preprocessing.extract_feature(signal, sr, 'mfcc', random_extraction=False)
+        # plt.title('Mel Cepstral Coefficients - ' + c, size=20)
+        # plt.xlabel('Time', size=15)
+        # plt.ylabel('Cepstral Coefficients', size=15)
+        # # plt.semilogy()
+        # plt.imshow(feature)
+        # plt.show()
         # f, t, Sxx[c] = spectrogram(signal, target_sr, noverlap=240, nfft=512, window=get_window('hamming', 400, 512))
         # mask = preprocessing.envelope(signal, target_sr, 0.006)
         # signal_hat = signal[mask]
@@ -750,69 +986,7 @@ if __name__ == '__main__':
         # mfccs_low[c] = mfcc(signal_hat, target_sr, lowfreq=0, highfreq=8000, winfunc=lambda x: np.hamming(x, )).T
         # feat = sbank(signal_hat, target_sr, winfunc=lambda x: np.hamming(x, ), preemph=0.97)[0]
         # filterbank_low[c] = np.log(feat).T
-
-    fig, axes = plt.subplots(1, 2, figsize=(20, 5))
-    fig.suptitle('Time Signal', size=20, y=1)
-    time_scale = np.linspace(0, 4, len(signals['siren']))
-
-    axes[0].set_title("Siren", size=20)
-    axes[0].plot(time_scale, signals['siren'])
-    axes[0].set_ylabel('Amplitude', size=20)
-    axes[0].set_xlabel('Time [sec]', size=20)
-
-    axes[1].set_title("Jackhammer", size=20)
-    axes[1].plot(time_scale, signals['jackhammer'])
-    axes[1].set_ylabel('Amplitude', size=20)
-    axes[1].set_xlabel('Time [sec]', size=20)
-    plt.show()
     exit()
-
-    fig, axes = plt.subplots(2, 2, figsize=(20, 10))
-    fig.suptitle('Siren', size=20)
-    time_scale = np.linspace(0, 4, len(signals[c]))
-    xcoords = np.linspace(0, 4, 16)
-    axes[0, 0].set_title("Framed Signal", size=20)
-    axes[0, 0].plot(time_scale, signals[c])
-    axes[0, 0].set_ylabel('Amplitude', size=20)
-    axes[0, 0].set_xlabel('Time [sec]', size=20)
-    for xc in xcoords:
-        axes[0, 0].axvline(x=xc, color='black', linestyle='--')
-
-    axes[0, 1].set_title("STFT", size=20)
-    axes[0, 1].plot(fft[c][1], fft[c][0])
-    axes[0, 1].set_ylabel('Magnitude [dB]', size=20)
-    axes[0, 1].set_xlabel('Frequency [Hz]', size=20)
-
-    axes[1, 0].set_title("Power Spectral Features", size=20)
-    axes[1, 0].pcolormesh(t, f, Sxx[c], cmap='hot')
-    axes[1, 0].set_ylabel('Frequency [Hz]', size=20)
-    axes[1, 0].set_xlabel('Time [sec]', size=20)
-
-    axes[1, 1].set_title("Log Power Spectral Features", size=20)
-    axes[1, 1].pcolormesh(t, f, np.log(Sxx[c]), cmap='hot')
-    axes[1, 1].set_ylabel('Frequency [Hz]', size=20)
-    axes[1, 1].set_xlabel('Time [sec]', size=20)
-    plt.show()
-
-
-
-
-        # axes[0, 0].set_title("Low_freq_mask")
-        # axes[0, 0].imshow(mfccs_low[c], cmap='hot', interpolation='nearest')
-        #
-        # axes[0, 1].set_title("Low_freq")
-        # axes[0, 1].imshow(mfccs_low_no_mask[c], cmap='hot', interpolation='nearest')
-        #
-        # axes[1, 0].set_title("LowFreq_mask")
-        # axes[1, 0].imshow(filterbank_low[c], cmap='hot', interpolation='nearest')
-        #
-        # axes[1, 1].set_title("Low_freq")
-        # axes[1, 1].imshow(logfbank_low_no_mask[c], cmap='hot', interpolation='nearest')
-
-        # plt.show()
-
-
-
 
 
 

@@ -1,0 +1,30 @@
+weights.49-0.75_spectogram_fold10.hdf5
+0.765625
+['engine_idling', 'drilling', 'jackhammer']
+[[123   0   8]
+ [ 20  65   2]
+ [ 22  23  57]]
+weights.42-0.78_spectogram_fold10.hdf5
+0.775
+['engine_idling', 'drilling', 'jackhammer']
+[[125   0   6]
+ [ 17  63   7]
+ [  4  38  60]]
+weights.36-0.76_spectogram_fold10.hdf5
+0.775
+['engine_idling', 'drilling', 'jackhammer']
+[[123   2   6]
+ [ 18  59  10]
+ [  5  31  66]]
+weights.52-0.77_spectogram_fold10.hdf5
+0.778125
+['engine_idling', 'drilling', 'jackhammer']
+[[123   0   8]
+ [ 20  66   1]
+ [  7  35  60]]
+weights.37-0.73_spectogram_fold10.hdf5
+0.796875
+['engine_idling', 'drilling', 'jackhammer']
+[[120   1  10]
+ [ 17  64   6]
+ [  8  23  71]]

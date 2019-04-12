@@ -4,7 +4,6 @@ import configparser
 import pandas as pd
 import numpy as np
 import os
-import re
 
 
 # ML libraries
@@ -152,13 +151,13 @@ class TrainAudioClassificator(PreprocessData):
         """
         # Train on data extracted
         self.model.fit_generator(self.preprocess_dataset_generator(mode='training'),
-                                 steps_per_epoch=10,
-                                 # steps_per_epoch=int(sum(self.n_training_samples.values())/self.batch_size),
+                                 # steps_per_epoch=10,
+                                 steps_per_epoch=int(sum(self.n_training_samples.values())/self.batch_size),
                                  epochs=self.epochs, verbose=1,
                                  callbacks=self.callbacks_list,
                                  validation_data=self.preprocess_dataset_generator(mode='validation'),
                                  validation_steps=int(sum(self.n_validation_samples.values())/self.batch_size),
-                                 class_weight=None, max_queue_size=3,
+                                 class_weight=None, max_queue_size=2,
                                  # workers=2, use_multiprocessing=True,
                                  shuffle=True, initial_epoch=0)
 
@@ -171,7 +170,7 @@ class TrainAudioClassificator(PreprocessData):
         :param mode:
         :return:
         """
-
+        # Goes though all the weights and returns the 5 top best accuracies
         if mode == 'test_all':
             # Generate labels for the test set which is used to generate the test set.
             y_true = self.generate_labels()
@@ -214,6 +213,7 @@ class TrainAudioClassificator(PreprocessData):
                 print(self.classes)
                 print(matrix)
 
+        # Tests one set of weights instead of all the weights
         elif mode == 'test_normal':
             # Load the model
             model = load_model(self.load_model_path)
@@ -291,7 +291,7 @@ def main():
     """
 
     # Read csv for UrbanSounds
-    df = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_length_augmented.csv')
+    df = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_augmented.csv')
 
     # Initialize class
     audio_model = TrainAudioClassificator(df)
