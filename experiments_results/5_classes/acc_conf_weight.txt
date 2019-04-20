@@ -1,0 +1,40 @@
+weights.06-0.63_scalogram_fold10.hdf5
+0.6492248062015504
+['engine_idling', 'siren', 'street_music', 'drilling', 'jackhammer']
+[[ 78   0   3   0  38]
+ [  0  52  30   9   1]
+ [  5   5  54  19  18]
+ [  0   9   3  49  35]
+ [  0   0   0   6 102]]
+weights.02-0.43_scalogram_fold10.hdf5
+0.6569767441860465
+['engine_idling', 'siren', 'street_music', 'drilling', 'jackhammer']
+[[54 22  6 11 26]
+ [ 0 75 16  1  0]
+ [ 0 11 60 22  8]
+ [ 0  9  3 55 29]
+ [ 3  0  0 10 95]]
+weights.53-0.67_scalogram_fold10.hdf5
+0.6569767441860465
+['engine_idling', 'siren', 'street_music', 'drilling', 'jackhammer']
+[[ 81   0   3   0  35]
+ [  3  39  33  16   1]
+ [  6   4  59  20  12]
+ [  2   5   0  54  35]
+ [  0   0   0   2 106]]
+weights.03-0.59_scalogram_fold10.hdf5
+0.6627906976744186
+['engine_idling', 'siren', 'street_music', 'drilling', 'jackhammer']
+[[79  0  5  9 26]
+ [ 0 60 32  0  0]
+ [ 9 19 56 13  4]
+ [ 0 10  6 50 30]
+ [ 5  0  0  6 97]]
+weights.05-0.63_scalogram_fold10.hdf5
+0.7015503875968992
+['engine_idling', 'siren', 'street_music', 'drilling', 'jackhammer']
+[[ 88   0   3   0  28]
+ [  0  52  38   2   0]
+ [  9   6  75   6   5]
+ [  0   9   4  45  38]
+ [  0   0   0   6 102]]

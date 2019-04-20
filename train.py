@@ -47,9 +47,9 @@ class LearningRateHistory(keras.callbacks.Callback):
         self.data_aug = data_aug
 
     def on_epoch_end(self, epoch, logs=None):
-        # aug_dat = self.data_aug['downsampledd'] / self.data_aug.values().sum()
+        # aug_dat = self.data_aug['downsampled'] / self.data_aug.values().sum()
         # norm_dat = self.data_aug['normal'] / self.data_aug.values().sum()
-        # print(f'downsampledd data: {aug_dat}, normal data: {norm_dat}')
+        # print(f'downsampled data: {aug_dat}, normal data: {norm_dat}')
         print(self.data_aug)
 
 
@@ -123,7 +123,12 @@ class TrainAudioClassificator(PreprocessData):
         # Define input shape and compile model
         else:
             num_classes = y.shape[1]
-            input_shape = (x.shape[1], x.shape[2], 1)
+            try:
+
+                input_shape = (x.shape[1], x.shape[2], 3)
+            except IndexError:
+                print("hold up")
+                print(x.shape)
             self.model = CNN.fetch_network(self.network_architecture,
                                            input_shape, num_classes, self.optimizer)
 
@@ -251,14 +256,15 @@ def run(audio_model):
 
         # Use generator for each batch. This option is more memory friendly
         x_train, y_train = next(audio_model.preprocess_dataset_generator(mode='training'))
-
+        # print(x_train[1].shape)
+        # exit()
         # Compile model
         audio_model.set_up_model(x_train, y_train)
 
         # Compute class weight
         audio_model.compute_class_weight(y_train)
 
-        # Train network
+        # # Train network
         audio_model.train()
 
     # Test a network

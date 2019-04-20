@@ -64,16 +64,13 @@ def novel_cnn(input_shape, num_classes, optimizer):
     """
     model = Sequential()
 
-    # CNN - 2 - Conv
+    # CNN - 1 - Conv
     model.add(Conv2D(16, 3, strides=3,
                      padding='same',
                      kernel_regularizer=l2(0.001),
                      input_shape=input_shape
                      ))
     model.add(LeakyReLU())
-    # model.add(MaxPool2D(1, 2))
-    # model.add(MaxPool2D(1, 2))
-
 
     # CNN - 2 - Conv
     model.add(Conv2D(32, 3, strides=3,
@@ -99,6 +96,7 @@ def novel_cnn(input_shape, num_classes, optimizer):
     model.add(Flatten())
     model.add(Dense(64))
     model.add(LeakyReLU())
+    model.add(Dense(64))
 
     # CNN - 5 Output
     model.add(Dense(num_classes, activation='softmax'))
@@ -179,7 +177,7 @@ def novel_cnn_small_kernels(input_shape, num_classes, optimizer):
                      input_shape=input_shape
                      ))
     model.add(LeakyReLU())
-    model.add(MaxPool2D(2, 2))
+    # model.add(MaxPool2D(2, 2))
     # CNN - 2 - Conv
     model.add(Conv2D(32, 1, strides=1,
                      kernel_regularizer=l2(0.001),
@@ -231,7 +229,7 @@ def bigger_net(input_shape, num_classes, optimizer):
                      ))
     model.add(LeakyReLU())
 
-    # VGG - 1 - Conv
+    # VGG - 2 - Conv
     model.add(Conv2D(32, 3, strides=3,
                      kernel_regularizer=l2(0.001),
                      padding='same'))
@@ -254,9 +252,7 @@ def bigger_net(input_shape, num_classes, optimizer):
                      kernel_regularizer=l2(0.001),
                      padding='same', ))
     model.add(LeakyReLU())
-
     model.add(Dropout(0.3))
-
     model.add(MaxPool2D(2, 2))
 
     # VGG - 4 - FCC
