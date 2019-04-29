@@ -72,7 +72,7 @@ class TrainAudioClassificator(PreprocessData):
             f'batch_size must be bigger than {1+len(self.time_shift_param)+len(self.pitch_shift_param)} because' \
             f'data augmentation is used'
 
-        self.batch_size_for_test = 4
+        self.batch_size_for_test = 32
         self.learning_rate = config['model'].getfloat('learning_rate')
         self.fold = config['model'].getint('fold')
         self.steps_per_epoch = config['model'].getint('steps_per_epoch')
@@ -123,12 +123,11 @@ class TrainAudioClassificator(PreprocessData):
         # Define input shape and compile model
         else:
             num_classes = y.shape[1]
-            try:
-
+            if self.file_type == 'jpeg':
                 input_shape = (x.shape[1], x.shape[2], 3)
-            except IndexError:
-                print("hold up")
-                print(x.shape)
+            elif self.file_type =='wav':
+                input_shape = (x.shape[1], x.shape[2], 1)
+
             self.model = CNN.fetch_network(self.network_architecture,
                                            input_shape, num_classes, self.optimizer)
 
@@ -142,7 +141,7 @@ class TrainAudioClassificator(PreprocessData):
                                      f'_{self.feature}_fold{self.validation_fold}.hdf5',
                                      monitor='val_acc',
                                      verbose=1,
-                                     save_best_only=False,
+                                     save_best_only=True,
                                      save_weights_only=False,
                                      mode='auto',
                                      period=1)
@@ -154,7 +153,10 @@ class TrainAudioClassificator(PreprocessData):
         Trains the model on data and validates after every epoch.
         :return:
         """
+
         # Train on data extracted
+        print(f"Training on: {sum(self.n_training_samples.values())} samples\n"
+              f"Validating on: {sum(self.n_validation_samples.values())} samples")
         self.model.fit_generator(self.preprocess_dataset_generator(mode='training'),
                                  # steps_per_epoch=10,
                                  steps_per_epoch=int(sum(self.n_training_samples.values())/self.batch_size),
@@ -162,7 +164,7 @@ class TrainAudioClassificator(PreprocessData):
                                  callbacks=self.callbacks_list,
                                  validation_data=self.preprocess_dataset_generator(mode='validation'),
                                  validation_steps=int(sum(self.n_validation_samples.values())/self.batch_size),
-                                 class_weight=None, max_queue_size=2,
+                                 class_weight=None, max_queue_size=4,
                                  # workers=2, use_multiprocessing=True,
                                  shuffle=True, initial_epoch=0)
 
@@ -175,37 +177,41 @@ class TrainAudioClassificator(PreprocessData):
         :param mode:
         :return:
         """
+        steps = int(sum(self.n_testing_samples.values()) / self.batch_size_for_test)
+
         # Goes though all the weights and returns the 5 top best accuracies
         if mode == 'test_all':
             # Generate labels for the test set which is used to generate the test set.
-            y_true = self.generate_labels()
+            data = self.generate_labels()
             accs = []
             conf_matrices = []
-            steps = int(sum(self.n_testing_samples.values()) / self.batch_size_for_test)
+
             # Loop through the saved weights
-            for file in tqdm(os.listdir('weights')):
+            for i, file in enumerate(os.listdir('weights')):
 
                 # Load the model
                 model = load_model(f'weights/{file}')
+
                 y_pred = []
 
                 # Run predictions on the test folds
-                prediction = model.predict_generator(self.generate_data_for_predict_generator(y_true),
+                prediction = model.predict_generator(self.generate_data_for_predict_generator(data),
                                                      steps=steps,
                                                      )
                 # Decode from one-hot encoding
                 prediction = np.argmax(prediction, axis=1)
                 for pred in prediction:
+
                     y_pred.append(self.classes[pred])
 
                 # Create confusion matrix calculate accuracy
-                matrix = confusion_matrix(y_true[:len(y_pred)], y_pred, self.classes)
+                matrix = confusion_matrix(data['labels'][:len(y_pred)], y_pred, self.classes)
                 accs.append(np.trace(matrix)/np.sum(matrix))
                 conf_matrices.append(matrix)
 
                 # Clear the session and prepare for a new model
                 backend.clear_session()
-
+                print(file+': Accuracy '+str(np.trace(matrix)/np.sum(matrix)))
             # Fetch the top best set of weights
             indexes = np.argpartition(accs, -5)[-5:]
             top_five_acc = np.array(accs)[indexes]
@@ -225,18 +231,19 @@ class TrainAudioClassificator(PreprocessData):
             y_pred = []
 
             # Generate labels for the test set which is used to generate the test set.
-            y_true = self.generate_labels()
-            prediction = model.predict_generator(self.generate_data_for_predict_generator(y_true),
-                                                 steps=int(sum(self.n_testing_samples.values()) / self.batch_size),
+            data = self.generate_labels()
+            prediction = model.predict_generator(self.generate_data_for_predict_generator(data),
+                                                 steps=steps,
                                                  verbose=1
                                                  )
             # Decode from one-hot encoding
             prediction = np.argmax(prediction, axis=1)
-            for pred in prediction:
+            for i, pred in enumerate(prediction):
+                print(pred, data['labels'][i])
                 y_pred.append(self.classes[pred])
-
+            exit()
             # Create confusion matrix calculate accuracy
-            matrix = confusion_matrix(y_true[:len(y_pred)], y_pred, self.classes)
+            matrix = confusion_matrix(data['labels'][:len(y_pred)], y_pred, self.classes)
             accuracy = np.trace(matrix) / np.sum(matrix)
             print("\n")
             print(self.classes)
@@ -297,7 +304,7 @@ def main():
     """
 
     # Read csv for UrbanSounds
-    df = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_augmented.csv')
+    df = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_length.csv')
 
     # Initialize class
     audio_model = TrainAudioClassificator(df)

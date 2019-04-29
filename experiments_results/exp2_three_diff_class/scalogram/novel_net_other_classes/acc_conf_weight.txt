@@ -1,0 +1,30 @@
+weights.63-0.86_scalogram_fold10.hdf5
+0.8485915492957746
+['engine_idling', 'siren', 'jackhammer']
+[[81  2 32]
+ [ 8 65  1]
+ [ 0  0 95]]
+weights.64-0.80_scalogram_fold10.hdf5
+0.8485915492957746
+['engine_idling', 'siren', 'jackhammer']
+[[80  3 32]
+ [ 8 66  0]
+ [ 0  0 95]]
+weights.03-0.88_scalogram_fold10.hdf5
+0.8626760563380281
+['engine_idling', 'siren', 'jackhammer']
+[[97  0 18]
+ [ 3 71  0]
+ [18  0 77]]
+weights.02-0.76_scalogram_fold10.hdf5
+0.8556338028169014
+['engine_idling', 'siren', 'jackhammer']
+[[87  5 23]
+ [ 0 74  0]
+ [13  0 82]]
+weights.26-0.93_scalogram_fold10.hdf5
+0.8626760563380281
+['engine_idling', 'siren', 'jackhammer']
+[[86  0 29]
+ [ 8 65  1]
+ [ 1  0 94]]

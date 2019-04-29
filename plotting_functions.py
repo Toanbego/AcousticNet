@@ -9,7 +9,7 @@ from matplotlib import pyplot as plt
 from scipy.io import wavfile
 from python_speech_features import mfcc, logfbank
 import numpy as np
-
+import pandas as pd
 
 def hamming_window():
     """
@@ -33,6 +33,19 @@ def hamming_window():
     plt.show()
     plt.close()
 
+
+def plot_performance(file_path, smoothing):
+    """
+    Plots the csv files from the tensorboard after training a network
+    :param smoothing: smothing factor (integer)
+    :return:
+    """
+    val_loss = pd.read_csv(file_path)
+    if smoothing >= 1:
+        val_loss = val_loss.rolling(window=smoothing)
+        val_loss = val_loss.mean()
+    val_loss.plot(x='Step', y='Value', grid=True)
+    plt.show()
 
 def plot_signals(signals, channel='stereo'):
     """
