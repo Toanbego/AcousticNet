@@ -1,0 +1,13 @@
+['siren', 'street_music', 'jackhammer']
+[[85  0  0]
+ [ 8 64  0]
+ [ 0  0 67]]
+0.9642857142857143
+
+'siren', 'street_music', 'jackhammer']
+Confusion matrix:
+[[82  3  0]
+ [ 1 80  3]
+ [ 0  3 84]]
+Accuracy: 0.9609375
+MIoU: 0.9252368647717484

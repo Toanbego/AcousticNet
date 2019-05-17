@@ -1,17 +1,19 @@
 
 # Standard libraries
 import configparser
+import re
+
 import pandas as pd
 import numpy as np
 import os
 
 
 # ML libraries
-from sklearn.metrics import confusion_matrix
+from sklearn.metrics import confusion_matrix, f1_score
 from keras.models import load_model
 
 from keras.callbacks import ModelCheckpoint, TensorBoard
-from sklearn.utils.class_weight import compute_class_weight
+from sklearn.utils.class_weight import compute_class_weight, compute_sample_weight
 import keras.optimizers
 import keras.backend as backend
 
@@ -38,19 +40,24 @@ def load_and_extract_features(filepath):
     return features['x'], features['y']
 
 
-class LearningRateHistory(keras.callbacks.Callback):
+class UpdateClassWeight(keras.callbacks.Callback):
     """
     Callback object that prints the learning rate
     """
-    def __init__(self, data_aug):
+    def __init__(self, audio_classifier):
         super().__init__()
-        self.data_aug = data_aug
+        self.audio_classifier = audio_classifier
 
     def on_epoch_end(self, epoch, logs=None):
-        # aug_dat = self.data_aug['downsampled'] / self.data_aug.values().sum()
-        # norm_dat = self.data_aug['normal'] / self.data_aug.values().sum()
-        # print(f'downsampled data: {aug_dat}, normal data: {norm_dat}')
-        print(self.data_aug)
+        """
+
+        :param batch:
+        :param logs:
+        :return:
+        """
+        print(self.audio_classifier.augs)
+        self.audio_classifier.augs = {}
+
 
 
 class TrainAudioClassificator(PreprocessData):
@@ -108,6 +115,7 @@ class TrainAudioClassificator(PreprocessData):
         """
         y_flat = np.argmax(y_train, axis=1)  # Reshape one-hot encode matrix back to string labels
         self.class_weight = compute_class_weight('balanced', np.unique(y_flat), y_flat)
+        print(self.class_weight)
 
     def set_up_model(self, x, y):
         """
@@ -145,8 +153,8 @@ class TrainAudioClassificator(PreprocessData):
                                      save_weights_only=False,
                                      mode='auto',
                                      period=1)
-        # check = LearningRateHistory(self.data_aug)
-        self.callbacks_list = [checkpoint, tb_callbacks]#, check]
+        check = UpdateClassWeight(self)
+        self.callbacks_list = [checkpoint, tb_callbacks, check]
 
     def train(self):
         """
@@ -157,6 +165,7 @@ class TrainAudioClassificator(PreprocessData):
         # Train on data extracted
         print(f"Training on: {sum(self.n_training_samples.values())} samples\n"
               f"Validating on: {sum(self.n_validation_samples.values())} samples")
+
         self.model.fit_generator(self.preprocess_dataset_generator(mode='training'),
                                  # steps_per_epoch=10,
                                  steps_per_epoch=int(sum(self.n_training_samples.values())/self.batch_size),
@@ -164,7 +173,7 @@ class TrainAudioClassificator(PreprocessData):
                                  callbacks=self.callbacks_list,
                                  validation_data=self.preprocess_dataset_generator(mode='validation'),
                                  validation_steps=int(sum(self.n_validation_samples.values())/self.batch_size),
-                                 class_weight=None, max_queue_size=4,
+                                 class_weight=self.class_weight, max_queue_size=3,
                                  # workers=2, use_multiprocessing=True,
                                  shuffle=True, initial_epoch=0)
 
@@ -178,77 +187,122 @@ class TrainAudioClassificator(PreprocessData):
         :return:
         """
         steps = int(sum(self.n_testing_samples.values()) / self.batch_size_for_test)
-
+        print(f"Training on: {sum(self.n_training_samples.values())} samples\n"
+              f"Validating on: {sum(self.n_validation_samples.values())} samples")
         # Goes though all the weights and returns the 5 top best accuracies
         if mode == 'test_all':
-            # Generate labels for the test set which is used to generate the test set.
-            data = self.generate_labels()
+
             accs = []
             conf_matrices = []
+            mious = []
+
+            weights = config['model']['weights'].replace('\n', '').split(',')[:-1]
+
+            seed = 50
 
             # Loop through the saved weights
-            for i, file in enumerate(os.listdir('weights')):
-
-                # Load the model
-                model = load_model(f'weights/{file}')
-
+            for weight in weights:
+                name_of_run = re.findall(r'.\\(.*)\\weights', weight)
+                self.feature = re.findall(r"\d\d_(.*)_fold", weight)[0]
+                self.audio_folder = self.feature
+                model = load_model(weight)
+                # Generate labels for the test set which is used to generate the test set.
+                data = self.generate_labels(seed)
                 y_pred = []
 
                 # Run predictions on the test folds
                 prediction = model.predict_generator(self.generate_data_for_predict_generator(data),
                                                      steps=steps,
+                                                     verbose=1,
                                                      )
                 # Decode from one-hot encoding
                 prediction = np.argmax(prediction, axis=1)
                 for pred in prediction:
-
                     y_pred.append(self.classes[pred])
 
-                # Create confusion matrix calculate accuracy
-                matrix = confusion_matrix(data['labels'][:len(y_pred)], y_pred, self.classes)
+                matrix, accuracy, miou = self.evaluate_performance_of_test(data, y_pred)
+                print(name_of_run)
+                print(self.classes)
+                print(f'Confusion matrix:\n{matrix}')
+                print(f'Accuracy: {accuracy}')
+                print(f'MIoU: {miou}\n')
+
+                backend.clear_session()
                 accs.append(np.trace(matrix)/np.sum(matrix))
                 conf_matrices.append(matrix)
+                mious.append(miou)
+            #
+            # # Fetch the top best set of weights
+            # indexes = np.argpartition(accs, -5)[-5:]
+            # top_five_acc = np.array(accs)[indexes]
+            # top_five_matrix = np.array(conf_matrices)[indexes]
+            # top_five_miou = np.array(mious)[indexes]
 
-                # Clear the session and prepare for a new model
-                backend.clear_session()
-                print(file+': Accuracy '+str(np.trace(matrix)/np.sum(matrix)))
-            # Fetch the top best set of weights
-            indexes = np.argpartition(accs, -5)[-5:]
-            top_five_acc = np.array(accs)[indexes]
-            top_five_weights = np.array(os.listdir('weights'))[indexes]
-            top_five_matrix = np.array(conf_matrices)[indexes]
-
-            for acc, weight, matrix in zip(top_five_acc, top_five_weights, top_five_matrix):
-                print(weight)
-                print(acc)
-                print(self.classes)
-                print(matrix)
+            # for acc, matrix, miou in zip(top_five_acc, top_five_matrix, top_five_miou):
+            #     print(self.classes)
+            #     print(f'Confusion matrix:\n{matrix}')
+            #     print(f'Accuracy: {acc}')
+            #     print(f'MIoU: {miou}\n')
 
         # Tests one set of weights instead of all the weights
         elif mode == 'test_normal':
             # Load the model
             model = load_model(self.load_model_path)
-            y_pred = []
-
             # Generate labels for the test set which is used to generate the test set.
-            data = self.generate_labels()
-            prediction = model.predict_generator(self.generate_data_for_predict_generator(data),
-                                                 steps=steps,
-                                                 verbose=1
-                                                 )
-            # Decode from one-hot encoding
-            prediction = np.argmax(prediction, axis=1)
-            for i, pred in enumerate(prediction):
-                print(pred, data['labels'][i])
-                y_pred.append(self.classes[pred])
-            exit()
-            # Create confusion matrix calculate accuracy
-            matrix = confusion_matrix(data['labels'][:len(y_pred)], y_pred, self.classes)
-            accuracy = np.trace(matrix) / np.sum(matrix)
-            print("\n")
-            print(self.classes)
-            print(matrix)
-            print(accuracy)
+            for seed in np.random.randint(0, 1000, 20):
+                y_pred = []
+                data = self.generate_labels(seed)
+                prediction = model.predict_generator(self.generate_data_for_predict_generator(data),
+                                                     steps=steps,
+                                                     verbose=1
+                                                     )
+                # Decode from one-hot encoding
+                prediction = np.argmax(prediction, axis=1)
+                for pred in prediction:
+                    y_pred.append(self.classes[pred])
+
+                # Evaluate run
+                matrix, accuracy = self.evaluate_performance_of_test(data, y_pred)
+
+                print("\n")
+                print(self.classes)
+                print(matrix)
+                print(accuracy)
+
+    def evaluate_performance_of_test(self, data, y_pred):
+        """
+        Calculates confusion matrix and mean Intersect Over Union
+        :return:
+        """
+
+        # Create confusion matrix calculate accuracy
+        matrix = confusion_matrix(data['labels'][:len(y_pred)], y_pred, self.classes)
+        accuracy = np.trace(matrix) / np.sum(matrix)
+
+        miou = self.mean_intersect_over_union(matrix)
+
+        return matrix, accuracy, miou
+
+    @staticmethod
+    def mean_intersect_over_union(matrix):
+        """
+        Calculate mean inttersect over union
+        :param matrix:
+        :return:
+        """
+        # Find mIoU
+        true_positives = np.diagonal(matrix)
+        miou = []
+        for i, t in enumerate(true_positives):
+            false_positive = matrix[:, i]
+            false_positive = np.delete(false_positive, [i, i])
+            false_positive = sum(false_positive)
+            false_negative = matrix[i, :]
+            false_negative = np.delete(false_negative, [i, i])
+            false_negative = sum(false_negative)
+            miou.append(t / (t + false_positive + false_negative))
+        miou = sum(miou) / len(miou)
+        return miou
 
 
 def run(audio_model):
@@ -261,10 +315,11 @@ def run(audio_model):
     # Train a network
     if audio_model.network_mode == 'train_network':
 
-        # Use generator for each batch. This option is more memory friendly
+        # Generate a sample of the data to use as setup for the model
+        audio_model.batch_size = 500
         x_train, y_train = next(audio_model.preprocess_dataset_generator(mode='training'))
-        # print(x_train[1].shape)
-        # exit()
+        audio_model.batch_size = config['model'].getint('batch_size')
+
         # Compile model
         audio_model.set_up_model(x_train, y_train)
 
@@ -304,7 +359,8 @@ def main():
     """
 
     # Read csv for UrbanSounds
-    df = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_length.csv')
+    dataframe_file = config['preprocessing']['csv_file']
+    df = pd.read_csv(dataframe_file)
 
     # Initialize class
     audio_model = TrainAudioClassificator(df)

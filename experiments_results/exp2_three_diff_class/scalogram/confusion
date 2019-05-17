@@ -1,0 +1,14 @@
+['siren', 'street_music', 'jackhammer']
+[[78  3  0]
+ [ 2 67  1]
+ [ 0  0 73]]
+0.9732142857142857
+
+['Users\\toanb\\OneDrive\\skole\\UiO\\Master\\code\\experiments_results\\exp2_three_diff_class\\scalogram']
+['siren', 'street_music', 'jackhammer']
+Confusion matrix:
+[[73  7  0]
+ [ 1 80  6]
+ [ 0  6 83]]
+Accuracy: 0.921875
+MIoU: 0.85830625947585

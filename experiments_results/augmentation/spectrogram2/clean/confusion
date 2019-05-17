@@ -1,0 +1,54 @@
+['air_conditioner', 'engine_idling', 'jackhammer', 'car_horn']
+Confusion matrix:
+[[60 37  0  0]
+ [ 4 41 48  2]
+ [ 5  2 74  3]
+ [ 0  2  1 41]]
+Accuracy: 0.675
+MIoU: 0.5651584988513776
+
+['air_conditioner', 'engine_idling', 'jackhammer', 'car_horn']
+Confusion matrix:
+[[53 39  0  0]
+ [ 9 47 45  0]
+ [ 7  1 71  1]
+ [ 0  0  1 46]]
+Accuracy: 0.678125
+MIoU: 0.5864748677248678
+
+['air_conditioner', 'engine_idling', 'jackhammer', 'car_horn']
+Confusion matrix:
+[[62 37  0  0]
+ [11 42 41  0]
+ [ 9  0 77  1]
+ [ 1  2  0 37]]
+Accuracy: 0.68125
+MIoU: 0.5841144161852803
+
+['air_conditioner', 'engine_idling', 'jackhammer', 'car_horn']
+Confusion matrix:
+[[53 44  0  0]
+ [10 41 37  1]
+ [ 5  1 94  0]
+ [ 3  2  0 29]]
+Accuracy: 0.678125
+MIoU: 0.569260742221357
+
+['air_conditioner', 'engine_idling', 'jackhammer', 'car_horn']
+Confusion matrix:
+[[61 27  0  0]
+ [ 8 38 46  0]
+ [ 7  4 80  1]
+ [ 1  2  1 44]]
+Accuracy: 0.696875
+MIoU: 0.5910093033893137
+
+['clean']
+['air_conditioner', 'engine_idling', 'jackhammer', 'car_horn']
+Confusion matrix:
+[[63 34  0  0]
+ [ 8 38 57  1]
+ [ 4  0 75  0]
+ [ 0  1  1 38]]
+Accuracy: 0.66875
+MIoU: 0.5814093675268277

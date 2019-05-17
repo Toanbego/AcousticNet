@@ -1,0 +1,43 @@
+['air_conditioner', 'engine_idling', 'drilling']
+Confusion matrix:
+[[67 31  0]
+ [ 1 89  4]
+ [ 9 10 45]]
+Accuracy: 0.78515625
+
+['air_conditioner', 'engine_idling', 'drilling']
+Confusion matrix:
+[[59 30  0]
+ [ 4 84  3]
+ [ 5  8 63]]
+Accuracy: 0.8046875
+
+['air_conditioner', 'engine_idling', 'drilling']
+Confusion matrix:
+[[54 24  0]
+ [ 4 87  4]
+ [ 5 11 67]]
+Accuracy: 0.8125
+
+['air_conditioner', 'engine_idling', 'drilling']
+Confusion matrix:
+[[64 30  0]
+ [ 1 87  4]
+ [13  6 51]]
+Accuracy: 0.7890625
+
+['air_conditioner', 'engine_idling', 'drilling']
+Confusion matrix:
+[[ 51  29   0]
+ [  2 102  11]
+ [  6   7  48]]
+Accuracy: 0.78515625
+
+['Users\\toanb\\OneDrive\\skole\\UiO\\Master\\code\\experiments_results\\three_classes_cont\\scalogram']
+['air_conditioner', 'engine_idling', 'drilling']
+Confusion matrix:
+[[54 48  0]
+ [ 2 84 12]
+ [22 11 55]]
+Accuracy: 0.6701388888888888
+

@@ -1,0 +1,54 @@
+['children_playing', 'siren', 'street_music', 'jackhammer']
+Confusion matrix:
+[[63  9 20 11]
+ [ 1 66  2  0]
+ [11  6 71  0]
+ [ 0  0  4 88]]
+Accuracy: 0.8181818181818182
+MIoU: 0.7026790805633755
+
+['children_playing', 'siren', 'street_music', 'jackhammer']
+Confusion matrix:
+[[ 54   4  24   8]
+ [  0  67   3   0]
+ [ 11   5  69   2]
+ [  0   0   4 101]]
+Accuracy: 0.8267045454545454
+MIoU: 0.7114403408616004
+
+['children_playing', 'siren', 'street_music', 'jackhammer']
+Confusion matrix:
+[[ 54   5  22  14]
+ [  0  69   4   0]
+ [  6   4  73   0]
+ [  0   0   1 100]]
+Accuracy: 0.8409090909090909
+MIoU: 0.7273296152520872
+
+['children_playing', 'siren', 'street_music', 'jackhammer']
+Confusion matrix:
+[[42  7 22  8]
+ [ 2 84  3  0]
+ [ 5  2 86  1]
+ [ 0  0  1 89]]
+Accuracy: 0.8551136363636364
+MIoU: 0.7402928789556698
+
+['children_playing', 'siren', 'street_music', 'jackhammer']
+Confusion matrix:
+[[47  6 18  9]
+ [ 0 86  8  0]
+ [11  3 76  1]
+ [ 0  0  2 85]]
+Accuracy: 0.8352272727272727
+MIoU: 0.7165947736932211
+
+['asym2']
+['children_playing', 'siren', 'street_music', 'jackhammer']
+Confusion matrix:
+[[105  12  37  15]
+ [  2 145  13   5]
+ [ 21   9 144   2]
+ [  0   0  11 183]]
+Accuracy: 0.8196022727272727
+MIoU: 0.6953155128510503

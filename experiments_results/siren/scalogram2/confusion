@@ -1,0 +1,7 @@
+['Users\\toanb\\OneDrive\\skole\\UiO\\Master\\code\\experiments_results\\siren\\scalogram2']
+['siren', 'secondary_class']
+Confusion matrix:
+[[ 65   1]
+ [  6 280]]
+Accuracy: 0.9801136363636364
+MIoU: 0.9391937669376693

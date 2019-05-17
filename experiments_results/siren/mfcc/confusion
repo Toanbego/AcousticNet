@@ -1,0 +1,34 @@
+['siren', 'secondary_class']
+Confusion matrix:
+[[ 66   3]
+ [  0 219]]
+Accuracy: 0.9895833333333334
+MIoU: 0.9715041128084607
+
+['siren', 'secondary_class']
+Confusion matrix:
+[[ 61   3]
+ [  0 224]]
+Accuracy: 0.9895833333333334
+MIoU: 0.9699545704845816
+
+['siren', 'secondary_class']
+Confusion matrix:
+[[ 66   1]
+ [  0 221]]
+Accuracy: 0.9965277777777778
+MIoU: 0.9902850611805836
+
+['siren', 'secondary_class']
+Confusion matrix:
+[[ 65   3]
+ [  0 220]]
+Accuracy: 0.9895833333333334
+MIoU: 0.971214719071485
+
+['siren', 'secondary_class']
+Confusion matrix:
+[[ 48   3]
+ [  0 237]]
+Accuracy: 0.9895833333333334
+MIoU: 0.9643382352941177

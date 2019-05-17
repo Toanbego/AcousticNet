@@ -1,0 +1,7 @@
+['Users\\toanb\\OneDrive\\skole\\UiO\\Master\\code\\experiments_results\\siren\\librosa60']
+['siren', 'secondary_class']
+Confusion matrix:
+[[ 64   8]
+ [  6 306]]
+Accuracy: 0.9635416666666666
+MIoU: 0.8883814102564103

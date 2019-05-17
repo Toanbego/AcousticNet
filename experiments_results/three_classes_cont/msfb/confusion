@@ -1,0 +1,43 @@
+['air_conditioner', 'engine_idling', 'drilling']
+Confusion matrix:
+[[48 13 32]
+ [19 50 10]
+ [26  2 56]]
+Accuracy: 0.6015625
+
+['air_conditioner', 'engine_idling', 'drilling']
+Confusion matrix:
+[[59  7 37]
+ [14 53 16]
+ [22  5 43]]
+Accuracy: 0.60546875
+
+['air_conditioner', 'engine_idling', 'drilling']
+Confusion matrix:
+[[51  7 39]
+ [12 57 21]
+ [17  4 48]]
+Accuracy: 0.609375
+
+['air_conditioner', 'engine_idling', 'drilling']
+Confusion matrix:
+[[51 12 30]
+ [17 48 11]
+ [29  0 58]]
+Accuracy: 0.61328125
+
+['air_conditioner', 'engine_idling', 'drilling']
+Confusion matrix:
+[[58  7 25]
+ [14 55 16]
+ [31  6 44]]
+Accuracy: 0.61328125
+
+['Users\\toanb\\OneDrive\\skole\\UiO\\Master\\code\\experiments_results\\three_classes_cont\\msfb']
+['air_conditioner', 'engine_idling', 'drilling']
+Confusion matrix:
+[[58 17 27]
+ [21 56 21]
+ [21  2 65]]
+Accuracy: 0.6215277777777778
+MIoU: 0.4531171442936149

@@ -1,0 +1,8 @@
+['Users\\toanb\\OneDrive\\skole\\UiO\\Master\\code\\experiments_results\\three_classes_cont\\librosa']
+['air_conditioner', 'engine_idling', 'drilling']
+Confusion matrix:
+[[68  6 28]
+ [22 65 11]
+ [ 0  4 84]]
+Accuracy: 0.7534722222222222
+MIoU: 0.6038854238202304

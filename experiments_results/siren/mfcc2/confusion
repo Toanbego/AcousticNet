@@ -1,0 +1,7 @@
+['Users\\toanb\\OneDrive\\skole\\UiO\\Master\\code\\experiments_results\\siren\\mfcc2']
+['siren', 'secondary_class']
+Confusion matrix:
+[[ 64   2]
+ [  4 282]]
+Accuracy: 0.9829545454545454
+MIoU: 0.9467261904761904

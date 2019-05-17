@@ -1,0 +1,39 @@
+['Users\\toanb\\OneDrive\\skole\\UiO\\Master\\code\\experiments_results\\siren\\librosa60']
+['siren', 'secondary_class']
+Confusion matrix:
+[[ 64   8]
+ [  6 306]]
+Accuracy: 0.9635416666666666
+MIoU: 0.8883814102564103
+
+['Users\\toanb\\OneDrive\\skole\\UiO\\Master\\code\\experiments_results\\siren\\mfcc']
+['siren', 'secondary_class']
+Confusion matrix:
+[[ 66   6]
+ [ 17 295]]
+Accuracy: 0.9401041666666666
+MIoU: 0.8346229948413539
+
+['Users\\toanb\\OneDrive\\skole\\UiO\\Master\\code\\experiments_results\\siren\\msfb']
+['siren', 'secondary_class']
+Confusion matrix:
+[[ 64   8]
+ [ 17 295]]
+Accuracy: 0.9348958333333334
+MIoU: 0.8204880617977528
+
+['Users\\toanb\\OneDrive\\skole\\UiO\\Master\\code\\experiments_results\\siren\\scalogram']
+['siren', 'secondary_class']
+Confusion matrix:
+[[ 68   4]
+ [ 39 273]]
+Accuracy: 0.8880208333333334
+MIoU: 0.7382683316227621
+
+['Users\\toanb\\OneDrive\\skole\\UiO\\Master\\code\\experiments_results\\siren\\spectogram']
+['siren', 'secondary_class']
+Confusion matrix:
+[[ 68   4]
+ [ 18 294]]
+Accuracy: 0.9427083333333334
+MIoU: 0.8429676511954993

@@ -10,6 +10,10 @@ from scipy.io import wavfile
 from python_speech_features import mfcc, logfbank
 import numpy as np
 import pandas as pd
+import seaborn as sns # data visualization library
+import re
+plt.style.use('ggplot')
+
 
 def hamming_window():
     """
@@ -34,18 +38,217 @@ def hamming_window():
     plt.close()
 
 
-def plot_performance(file_path, smoothing):
+def smoothTriangle(data, degree, dropVals=False):
+    triangle = np.array(list(range(degree)) + [degree] + list(range(degree)[::-1])) + 1
+    smoothed = []
+
+    for i in range(degree, len(data) - degree * 2):
+        point = data[i:i + len(triangle)] * triangle
+        smoothed.append(sum(point) / sum(triangle))
+    if dropVals:
+        return smoothed
+    smoothed = [smoothed[0]] * int(degree + degree / 2) + smoothed
+    while len(smoothed) < len(data):
+        smoothed.append(smoothed[-1])
+    return smoothed
+
+
+def plot_performance(file_path, smoothing, plot_title='Performance', column_name='Value', color=None, style=None, f='f'):
     """
     Plots the csv files from the tensorboard after training a network
+    :param column_name:
+    :param plot_title:
+    :param file_path:
     :param smoothing: smothing factor (integer)
     :return:
     """
-    val_loss = pd.read_csv(file_path)
+    epoch_length = pd.read_csv(f)
+    epoch_length = len(epoch_length['Value'])
+
+    # Read csv
+    if type(file_path) is str:
+        tensorboard_result = pd.read_csv(file_path)
+    else:
+        tensorboard_result = file_path
+    # Apply smoothing if smoothing is given
     if smoothing >= 1:
-        val_loss = val_loss.rolling(window=smoothing)
-        val_loss = val_loss.mean()
-    val_loss.plot(x='Step', y='Value', grid=True)
-    plt.show()
+        tensorboard_result = tensorboard_result.rolling(window=smoothing)
+        tensorboard_result = tensorboard_result.mean()
+
+    # Change column name from value to specified feature
+    tensorboard_result.rename(inplace=True, columns={'Value': column_name})
+
+    # Convert steps axis to number of epochs
+    step_axis = np.linspace(0, 30, len(tensorboard_result['Step']))
+
+    # Plot results
+    if color is not None and style is None:
+        plt.plot(step_axis, tensorboard_result[column_name], label=column_name, color=color)
+    elif style is not None and color is None:
+        plt.plot(step_axis, tensorboard_result[column_name], label=column_name, linestyle=style)
+    elif style is not None and color is not None:
+        plt.plot(step_axis, tensorboard_result[column_name], label=column_name, linestyle=style, color=color)
+    else:
+        plt.plot(step_axis, tensorboard_result[column_name], label=column_name)
+
+
+def apply_smoothing(data, smoothing):
+    # Apply smoothing if smoothing is given
+    if smoothing >= 1:
+        data = data.rolling(window=smoothing)
+        data = data.mean()
+    return data
+
+def plot_results():
+    """
+    Hardcoded function that plots different metric with correct axis names and numbers
+    :return:
+    """
+    mode = 'box'
+
+    f =   r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\augmentation\librosa2\time shift\run-.-tag-' + f'val_acc.csv'
+    for metric in ['acc', 'loss', 'val_acc', 'val_loss']:
+
+        # ' + f'{metric}.csv'
+        file_path_clean =           r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\augmentation\librosa_add\clean\run-.-tag-' + f'{metric}.csv'
+        file_path_time_shift_add =      r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\augmentation\librosa_add\time shift\run-.-tag-' + f'{metric}.csv'
+        file_path_pitch_shift_add =   r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\augmentation\librosa_add\pitch shift\run-.-tag-' + f'{metric}.csv'
+        file_path_noise05_add =   r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\augmentation\librosa_add\noise 0.005\run-.-tag-' + f'{metric}.csv'
+        file_path_nosie01 =      r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\augmentation\librosa_add\noise 0.001\run-.-tag-' + f'{metric}.csv'
+        file_path_asym_msfb =       r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\asym_reg\msfb asym\run-.-tag-' + f'{metric}.csv'
+        file_path_clean_scalogram = r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\asym_reg\scalogram clean\run-.-tag-' + f'{metric}.csv'
+        file_path_asym_scalogram =       r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\asym_reg\scalogram asym\run-.-tag-' + f'{metric}.csv'
+
+        smoothing = 1
+        csv_files = [file_path_clean,
+                     file_path_time_shift_add,
+                     file_path_pitch_shift_add,
+                     file_path_noise05_add,
+                     file_path_nosie01,
+                     # file_path_asym_msfb,
+                     # file_path_clean_scalogram,
+                     # file_path_asym_scalogram
+                     ]
+
+        # values_only = pd.merge(mfcc, scalogram, on='Step')
+        values_only = {}
+        if mode == 'box':
+            for file in csv_files:
+                feature = re.findall(r"librosa_add\\(.*)\\run", file)[0]
+                data = apply_smoothing(pd.read_csv(file).Value, smoothing)
+                if feature == 'librosa':
+                    feature = 'msfb - 128'
+                elif feature == 'librosa60':
+                    feature = 'msfb - 128'
+                elif feature == 'msfb2':
+                    feature = 'msfb - 26'
+                elif feature == 'scalogram2':
+                    feature = 'scalogram'
+                elif feature == 'spectogram':
+                    feature = 'spectrogram'
+                elif feature == 'mfcc2':
+                    feature = 'mfcc'
+                elif feature == 'noise_0005' or feature == 'noise 0.005 (add)':
+                    feature = '\u03BC = 0.005'
+
+                elif feature == 'noise':
+                    feature = '\u03BC = 0.005'
+                elif feature == 'noise_0001' or feature == 'noise 0.001 (add)':
+                    feature = '\u03BC = 0.001'
+                elif feature == 'pitch_shift2':
+                    feature = 'pitch shift'
+
+                values_only[feature] = data
+            values_only = pd.DataFrame(values_only)
+
+
+        else:
+            for file in csv_files:
+                featre = feature = re.findall(r"librosa2\\(.*)\\run", file)[0]
+                if feature == 'clean':
+                    plot_performance(file,
+                                     smoothing=smoothing,
+                                     column_name=feature,
+                                     style='-',
+                                     f=f)
+                else:
+                    plot_performance(file,
+                                     smoothing=smoothing,
+                                     column_name=feature,
+                                     style='--',
+                                     f=f)
+            # plot_performance(file_path_msfb_26,
+            #                  smoothing=smoothing,
+            #                  column_name='msfb-26',
+            #                  color='purple',
+            #                  style='-', f=f)
+            # plot_performance(file_path_scalogram,
+            #                  smoothing=smoothing,
+            #                  column_name='scalogram',
+            #                  color='g',
+            #                  style='-', f=f)
+            # plot_performance(file_path_spectogram,
+            #                  smoothing=smoothing,
+            #                  column_name='spectrogram',
+            #                  color='b',
+            #                  style='-', f=f)
+            # plot_performance(file_path_msfb_128,
+            #                  smoothing=smoothing,
+            #                  column_name='msfb-128',
+            #                  color='orange',
+            #                  style='-', f=f)
+
+        if mode == 'box':
+            if metric == 'val_acc' or metric == 'acc':
+                plt.title('Performance - Accuracy', size=15, color='black')
+                plt.ylabel('Accuracy', size=15, color='black')
+                if metric == 'acc':
+                    metric = 'train_acc'
+
+            elif metric == 'loss' or metric == 'val_loss':
+                plt.title('Performance - Loss', size=15, color='black')
+                plt.ylabel('Loss', size=15, color='black')
+                if metric == 'loss':
+                    metric = 'train_loss'
+
+            file_path_img = f"C:/Users/toanb/Dropbox/Apps/Overleaf/Master thesis/result_images/BOX_{metric}_aug_add.png"
+            ax = sns.boxplot(data=values_only)
+            ax.set_xticklabels(ax.get_xticklabels(), fontsize=14, color='black',
+                               rotation=40, ha="right",
+                               )
+            plt.tight_layout()
+            rc = {'axes.labelsize': 40, 'font.size': 40, 'legend.fontsize': 40, 'axes.titlesize': 40}
+            sns.set(rc=rc)
+            plt.savefig(file_path_img)
+            plt.show()
+            print(f"image saved: {file_path_img}")
+            # plt.close()
+            continue
+
+        plt.legend(prop={'size': 11})
+        if metric == 'acc':
+            plt.title('Training Accuracy', size=15)
+            plt.ylabel('Accuracy', size=15)
+            metric = 'train_acc'
+        elif metric == 'val_acc':
+            plt.title('Validation Accuracy', size=15)
+            plt.ylabel('Accuracy', size=15)
+        elif metric == 'loss':
+            plt.title('Training Loss', size=15)
+            plt.ylabel('Loss', size=15)
+            metric = 'train_loss'
+        elif metric == 'val_loss':
+            plt.title('Validation Loss', size=15)
+            plt.ylabel('Loss', size=15)
+        plt.xlabel('Epoch', size=15)
+
+
+        file_path_img = f"C:/Users/toanb/Dropbox/Apps/Overleaf/Master thesis/result_images/{metric}_aug_add_graph.png"
+
+        plt.savefig(file_path_img)
+        plt.show()
+        print(f"image saved: {file_path_img}")
+        plt.close()
 
 def plot_signals(signals, channel='stereo'):
     """
@@ -110,18 +313,57 @@ def plot_fbank(fbank):
             i += 1
 
 
+def cool_box_plots(sns):
+    fig, axes = plt.subplots(1, 2, figsize=(20, 5))
+
+    # Original
+    ax = sns.boxplot(data=X_numeric, ax=axes[0])
+    ax = sns.swarmplot(data=X_numeric, color='.35', size=4, ax=axes[0])
+
+    # Preprocessed
+    ax = sns.boxplot(data=X_preprocessed, ax=axes[1])
+    ax = sns.swarmplot(data=X_preprocessed, color='.35', size=4, ax=axes[1])
+
+
+def plot_spectrogram_with_cool_axes(signal, sr, spectrogram):
+    """
+    so cool
+    :param signal:
+    :param sr:
+    :param spectrogram:
+    :return:
+    """
+    fig, ax = plt.subplots(2, 1, sharex=False, sharey=False, figsize=(6, 5))
+    plt.grid()
+    # ax[0] = fig.add_axes([0.1, 0.75, 0.7, 0.2])  # [left bottom width height]
+
+    ax[0].axes.set_xlim([0, len(signal)])
+    ax[0].plot(signal, color='black')
+    ax[0].set_ylabel('Amplitude')
+    ax[0].set_xlabel('Time [seconds]')
+    ax[1].set_ylabel('Frequency [Hz]')
+    ax[1].set_xlabel('Time [Frames]')
+    busk = ax[1].imshow(spectrogram)
+    # pxx, freq, t, cax = plt.specgram(signal, Fs=16000, NFFT=512, window=np.hamming(512), axes=ax[1])
+
+    fig.colorbar(busk).set_label('Power [dB]')
+
+    plt.show()
+    exit()
+
+
 def plot_mfccs(mfccs):
     """
     Plots the mel filter cepstrum coefficients
     :param mfccs:
     :return:
     """
-    fig, axes = plt.subplots(nrows=2, ncols=5, sharex=False,
+    fig, axes = plt.subplots(nrows=4, ncols=1, sharex=False,
                              sharey=True, figsize=(20, 5))
     fig.suptitle('Mel Frequency Cepstrum Coefficients', size=16)
     i = 0
-    for x in range(2):
-        for y in range(5):
+    for x in range(4):
+        for y in range(1):
             axes[x, y].set_title(list(mfccs.keys())[i])
             axes[x, y].imshow(list(mfccs.values())[i], cmap='hot', interpolation='nearest')
             axes[x, y].get_xaxis().set_visible(False)

@@ -1,0 +1,14 @@
+['siren', 'street_music', 'jackhammer']
+[[80  1  0]
+ [ 2 68  0]
+ [ 0  6 67]]
+0.9598214285714286
+
+['Users\\toanb\\OneDrive\\skole\\UiO\\Master\\code\\experiments_results\\exp2_three_diff_class\\spectogram']
+['siren', 'street_music', 'jackhammer']
+Confusion matrix:
+[[74  6  0]
+ [ 1 86  0]
+ [ 0  6 83]]
+Accuracy: 0.94921875
+MIoU: 0.9049504617544567

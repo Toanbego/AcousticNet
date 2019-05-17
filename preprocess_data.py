@@ -5,19 +5,16 @@ Date - 08.01.2019
 Preprocessing script for all your preprocessing needs
 """
 
-
 # Signal processing libraries
 import resampy
 import librosa
-import muda
-import jams
 from scipy.io import wavfile
 import soundfile as sf
 import pyrubberband as pyrb
-from python_speech_features import mfcc, logfbank, fbank, sigproc, delta, get_filterbanks
+from python_speech_features import mfcc, logfbank, fbank, sigproc, delta, get_filterbanks, dct, lifter
 from scipy.signal import spectrogram, get_window
-# import os
-# os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import cv2
 import math
 
@@ -28,6 +25,7 @@ from tqdm import tqdm
 # Standard libraries
 import numpy as np
 from matplotlib import pyplot as plt
+# plt.style.use('ggplot')
 import configparser
 from keras.utils import to_categorical
 # Parse the config.ini file
@@ -299,39 +297,53 @@ def waveft(wavelet, omega, scales):
     return wft, frequencies
 
 
-def save_scalograms(preproc, df):
+def extract_and_save_spectograms_as_images(preproc, df):
     """
     Extracts scalograms from audio files and saves as png.
     :param preproc:
     :param df:
     :return:
     """
-    for wav_file in tqdm(df.slice_file_name[32009:]):
+
+    # df = df[df.param == 0.001]
+
+    import librosa
+    for wav_file in tqdm(df.slice_file_name):
 
         # Find filename and filepath
         fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
-
         file_name = f'../Datasets/audio/augmented/fold{fold}/{wav_file}'
+        signal, sr = sf.read(file_name)
+        # # Read file, monotize if stereo and resample
+        # msfb = preproc.extract_feature(file_name, 'msfb', random_extraction=False)
+        # plt.imshow(msfb, cmap='hot')
+        # plt.imsave('../Datasets/audio/msfb/fold' + str(fold) + '/' + str(wav_file) + '.jpeg', msfb)
+        # plt.close()
+        #
+        # mfcc = preproc.extract_feature(file_name, 'mfcc', random_extraction=False)
+        # plt.imshow(mfcc, cmap='hot')
+        # plt.imsave('../Datasets/audio/mfcc/fold' + str(fold) + '/' + str(wav_file) + '.jpeg', mfcc)
+        # plt.close()
 
-        # Read file, monotize if stereo and resample
-        msfb = preproc.extract_feature(file_name, 'msfb', random_extraction=False,
-                                           activate_threshold=preprocessing.activate_envelope)
-        plt.imshow(msfb, cmap='hot')
-        plt.imsave('../Datasets/audio/msfb/fold' + str(fold) + '/' + str(wav_file) + '.jpeg', msfb)
-        plt.close()
-
-        mfcc = preproc.extract_feature(file_name, 'mfcc', random_extraction=False,
-                                       activate_threshold=preprocessing.activate_envelope)
-        plt.imshow(mfcc, cmap='hot')
-        plt.imsave('../Datasets/audio/mfcc/fold' + str(fold) + '/' + str(wav_file) + '.jpeg', mfcc)
-        plt.close()
-
-        spectogram = preproc.extract_feature(file_name, 'spectogram', random_extraction=False,
-                                             activate_threshold=preprocessing.activate_envelope)
+        # spectogram = preproc.extract_feature(file_name, 'spectogram', random_extraction=False)
+        spectogram = librosa.feature.melspectrogram(signal, sr)
+        spectogram = np.log(spectogram)
         plt.imshow(spectogram, cmap='hot')
-        plt.imsave('../Datasets/audio/spectogram/fold' + str(fold) + '/' + str(wav_file) + '.jpeg', spectogram)
+        plt.imsave('../Datasets/audio/librosa/fold' + str(fold) + '/' + str(wav_file) + '.jpeg', spectogram)
         plt.close()
     exit()
+
+
+def apply_smoothing(df, smoothing=15):
+    """
+    Applies a smoothing factor to pandas dataframe
+    :return:
+    """
+    # Apply smoothing if smoothing is given
+    if smoothing >= 1:
+        df = df.rolling(window=smoothing)
+        df = df.mean()
+    return df
 
 
 class PreprocessData:
@@ -339,35 +351,25 @@ class PreprocessData:
     def __init__(self, df):
 
         # Find classes and create class distribution
-        self.classes = [
-            # 'children_playing',
-            'air_conditioner',
-            'engine_idling',
-            # 'siren',
-            # 'street_music',
-            'drilling',
-            # 'jackhammer',
-            # 'dog_bark',
-            # 'gun_shot',
-            # 'car_horn'
-        ]
+        self.classes = config['preprocessing']['classes'].replace('\n', '').split(',')[:-1]
+        self.two_class = config['preprocessing']['two_class']
 
         # Augmentation parameters
         self.augmentations = config['augmentation']['augmentations']
-        self.pitch_shift = config['augmentation'].getboolean('pitch_shift')
-        self.time_shift = config['augmentation'].getboolean('time_shift')
         self.time_shift_param = list(map(float, config['augmentation']['time_shift_param'].split(',')))
         self.pitch_shift_param = list(map(float, config['augmentation']['pitch_shift_param'].split(',')))
-
+        self.noise_factor = list(map(float, config['augmentation']['noise_factor'].split(',')))
+        self.test_augmentation = config['augmentation'].getboolean('test_augmentation')
+        self.aug = config['augmentation']['augmentation']
         # Read and filter dataframes
-        df_v = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_length.csv')
-        self.df, self.df_v = self.filter_dataframe(df, df_v)
-
+        self.df, self.df_v = self.filter_dataframe(df)
+        self.df_v = pd.read_csv(r'C:\Users\toanb\OneDrive\skole\UiO\Master\Datasets\UrbanSound8K\metadata\UrbanSound8K_length.csv')
         # Audio parameters
         self.randomize_rolls = config['preprocessing'].getboolean('randomize_roll')
         self.random_extraction = config['preprocessing'].getboolean('random_extraction')
-
+        self.grayscale = config['preprocessing'].getboolean('use_grayscale')
         self.feature = config['preprocessing']['feature']
+        self.voices_per_octave = config['preprocessing'].getint('precision')
         self.n_filt = config['preprocessing'].getint('n_filt')
         self.n_feat = config['preprocessing'].getint('n_feat')
         self.n_fft = config['preprocessing'].getint('n_fft')
@@ -378,13 +380,24 @@ class PreprocessData:
         self.sample_length_scalogram = config['preprocessing'].getfloat('step_size_scalogram')    # Given in percentages
         self.sample_length = int(self.rate * self.step_length)                                  # Given in samples
 
-
         self.activate_envelope = config['preprocessing'].getboolean('activate_thresholding')
         self.threshold = config['preprocessing'].getfloat('threshold')
         self.audio_folder = config['preprocessing']['audio_folder']
+
+
+        if config['model']['network_mode'] == 'test_network':
+            # Check the feature to test from the weight name
+            self.feature = re.findall(r"\d\d_(.*)_fold", config['model']['load_model'])[0]
+
+        # Check if using images instead of directly extracting features
+        if self.audio_folder == 'img':
+            self.audio_folder = self.feature
         self.file_type = os.listdir(f'../Datasets/audio/{self.audio_folder}/fold1/')[0].split('.')[-1]
 
         if self.file_type == 'wav':
+            self.random_extraction = True
+            self.step_length = 3
+            self.sample_length = int(self.rate * self.step_length)  # Given in samples
             assert self.step_length <= config['preprocessing'].getfloat('signal_minimum_length'), \
                 f'step_length is larger than signal_length. ' \
                 f'Please set a value for step_length that is lower than signal_length'
@@ -398,19 +411,44 @@ class PreprocessData:
         else:
             self.n_training_samples = self.find_samples_per_epoch(self.df, start_fold=1, end_fold=9)
             self.n_validation_samples = self.find_samples_per_epoch(self.df_v, start_fold=10, end_fold=10)
-
+            self.n_testing_samples = self.find_samples_per_epoch(self.df_v, start_fold=10, end_fold=10)
         self.training_seed, self.validation_seed = np.random.randint(0, 100000, 2)
         self.testing_seed = 42
         self.scales = np.arange(1, 151)
+        # Train on data extracted
+        print(f"Training on: {sum(self.n_training_samples.values())} samples\n"
+              f"Validating on: {sum(self.n_validation_samples.values())} samples")
+        self.augs = {}
+
         # Use the sample numbers to create probability distribution for the labels
         self.class_dist = [self.n_training_samples[classes] / sum(self.n_training_samples.values())
                            for classes in self.classes]
+
         self.prob_dist = pd.Series(self.class_dist, self.classes)
 
-        self.chosen_class_dist = {}
+        # Convert classes into one main class and secondary classes. Only executes this if two_class is set.
+        self.convert_to_two_class_problem()
+
         self.validation_fold = None
 
-    def filter_dataframe(self, df, df_v):
+    def convert_to_two_class_problem(self):
+        """
+        Convert a problem into a two class classification.
+        This means that you can train the model to recognize one class from several others.
+        In the config file, set the variable two_class = (main class to find). Then choose what
+        classes to separate from in the variable "classes".
+        :return:
+        """
+        if self.two_class:
+            secondary_classes_prob = 1 - self.prob_dist[(self.two_class)]
+            self.prob_dist = pd.Series([self.prob_dist[self.two_class], secondary_classes_prob],
+                                            index=['main_class', 'secondary_classes'])
+            if self.two_class in (self.classes):
+                self.classes.remove(self.two_class)
+            self.secondary_classes = self.classes
+            self.classes = [self.two_class, 'secondary_class']
+
+    def filter_dataframe(self, df):
         """
         Filters out the dataframe based on the specifications from the config file
         :return:
@@ -418,28 +456,34 @@ class PreprocessData:
 
         # Filter out short audio
         df = df.loc[df['length'] >= config['preprocessing'].getfloat('signal_minimum_length')]
-        df_v = df_v.loc[df_v['length'] >= config['preprocessing'].getfloat('signal_minimum_length')]
 
         # Filter out unused params
         total_of_params = self.time_shift_param
         total_of_params.extend(self.pitch_shift_param)
+        total_of_params.extend(self.noise_factor)
         total_of_params.append(float('NaN'))
+
+        # Check if any augmentation parameters are set
         try:
             df = df[df.param.isin(total_of_params)]
         except AttributeError:
-            return df, df_v
+            return df, df
 
         # Filter out augmentation
         if 'time_shift' not in self.augmentations:
             df = df[df.augmentation != 'time']
+
         if 'pitch_shift' not in self.augmentations:
             df = df[df.augmentation != 'pitch']
 
+        if 'noise' not in self.augmentations:
+            df = df[df.augmentation != 'noise']
+
         # Reset the indexes
         df = df.reset_index()
-        df_v = df_v.reset_index()
+        df = df.drop('index', axis=1)
 
-        return df, df_v
+        return df, df
 
     def select_random_audio_clip(self, sample, seed=None):
         """
@@ -478,7 +522,7 @@ class PreprocessData:
 
             for label in self.classes:
                 # Find all the matches of that class in the fold
-                files_with_class = files_in_fold[df.label == label]
+                files_with_class = files_in_fold[files_in_fold.label == label]
 
                 if self.file_type == 'jpeg':
                     if label in samples_dict.keys():
@@ -494,14 +538,45 @@ class PreprocessData:
 
         return samples_dict
 
+    def preprocess_signal(self, random_extraction, feature_to_extract,
+                          sample, rate,
+                          seed, activate_threshold,
+                          augmentation, aug_param):
+        """
+        Apply various preprocessing on a time series signal
+        :return:
+        """
+        if random_extraction is True:
+            # Choose a window of the signal to use for the sample
+            try:
+                if feature_to_extract != 'scalogram':
+                    sample = self.select_random_audio_clip(sample, seed)
+
+            except ValueError:
+                print("audio file to small. Skip and move to next")
+                return 'move to next file'
+
+        # Perform filtering with a threshold on the time signal
+        if activate_threshold is True:
+            mask = self.envelope(sample, rate, self.threshold)
+            sample = sample[mask]
+
+        if augmentation == 'pitch_shift' or augmentation == 'time_shift' or augmentation == 'noise':
+            sample = self.deform_signal(sample, rate, augmentation, aug_param)
+
+        return sample
+
     def extract_feature(self, file_path, feature_to_extract='mfcc',
-                        activate_threshold=False, seed=None, delta_delta=False, random_extraction=True):
+                        activate_threshold=False, seed=None, delta_delta=False, random_extraction=True,
+                        augmentation=False, aug_param=0, file_type=None):
         """
         Reads the signal from the file path for then to extract one of several spectral features.
         Available options are: mfcc, msfb, spectogram, scalogram and fbank. Can either be extracted from a wav
         file. Has the option to simply read image files of spectograms if they ahve been extracted in advance. This is
         potentially much faster.
         Available preprocessing options: enveloping, random_extraction and delta-delta
+        :param aug_param: Augmentation factor
+        :param augmentation: Type of augmentation: pitch shift or time shift
         :param random_extraction: Activate to extract a random clip of the sample
         :param delta_delta: Append the delta_delta to the end of the feature vectors
         :param file_path:
@@ -512,34 +587,36 @@ class PreprocessData:
         :param activate_threshold: A lower boundary to filter out weak signals
         :return:
         """
+        if file_type is not None:
+            self.file_type = file_type
+
         # If file is wav file
         if self.file_type == 'wav':
             sample, rate = sf.read(file_path)
-            if random_extraction is True:
-                # Choose a window of the signal to use for the sample
-                try:
-                    if feature_to_extract != 'scalogram':
-                        sample = self.select_random_audio_clip(sample, seed)
-
-                except ValueError:
-                    print("audio file to small. Skip and move to next")
-                    return 'move to next file'
-
-            # Perform filtering with a threshold on the time signal
-            if activate_threshold is True:
-                mask = self.envelope(sample, rate, self.threshold)
-                sample = sample[mask]
+            sample = self.make_signal_mono(sample)
+            sample = self.preprocess_signal(random_extraction, feature_to_extract,
+                                            sample, rate,
+                                            seed, activate_threshold,
+                                            augmentation, aug_param)
 
         # If file is jpeg file
         elif self.file_type == 'jpeg':
             with Image.open(file_path + '.jpeg') as sample:
                 # Convert image to numpy array and resize so all are the same spatial size.
                 sample_hat = np.asarray(sample)
+                if self.grayscale == True:
+                    sample_hat = cv2.cvtColor(sample_hat, cv2.COLOR_BGR2GRAY)
+
+
             if random_extraction is True:
                 # Choose a window of the signal to use for the sample
                 np.random.seed(seed)
-                rand_index = np.random.randint(0, sample_hat.shape[0] - sample_hat.shape[0]*self.sample_length_scalogram)
-                return sample_hat[:, rand_index:rand_index + self.sample_length]
+
+                rand_index = np.random.randint(0, sample_hat.shape[1] - int(sample_hat.shape[1]*self.sample_length_scalogram))
+                sample_hat = sample_hat[:, rand_index:rand_index + int(sample_hat.shape[1]*self.sample_length_scalogram)]
+                if sample_hat.shape[1] != 299:
+                    sample_hat = cv2.resize(sample_hat, (299, 26), interpolation=cv2.INTER_AREA)
+                    return sample_hat
 
         # Extracts the mel frequency cepstrum coefficients
         if feature_to_extract == 'mfcc':
@@ -548,6 +625,7 @@ class PreprocessData:
                               numcep=self.n_feat,
                               nfilt=self.n_filt,
                               nfft=self.n_fft).T
+
             elif self.file_type == 'jpeg':
                 width = 399
                 height = 13
@@ -593,11 +671,22 @@ class PreprocessData:
                 dim = (width, height)
                 sample_hat = cv2.resize(sample_hat, dim, interpolation=cv2.INTER_AREA)
 
+        elif feature_to_extract == 'librosa':
+            if self.file_type == 'wav':
+                sample = librosa.feature.melspectrogram(sample, rate, n_fft=1200, hop_length=512)
+                sample_hat = np.log(sample)
+            elif self.file_type == 'jpeg':
+                width = 126
+                height = 128
+                dim = (width, height)
+                sample_hat = cv2.resize(sample_hat, dim, interpolation=cv2.INTER_AREA)
 
         # Extract the wavelet transform of the signal at different scales
         elif feature_to_extract == 'scalogram':
             if self.file_type == 'wav':
-                sample_hat = cwt(sample_hat, 'morlet')
+                sample_hat, _ = cwt(sample, 'morl')
+                sample_hat = np.abs(sample_hat)
+
             elif self.file_type == 'jpeg':
                 # Due to a scaling error, 4 scales needs to be dropped in height
                 width = 500
@@ -617,8 +706,10 @@ class PreprocessData:
 
         # Apply the change of the dynamics to the feature vector
         if delta_delta is True:
-            d = delta(sample_hat.T, 2)
-            sample_hat = np.append(sample_hat.T, d, axis=0)
+            sample_hat = sample_hat
+            d = delta(sample_hat, 2)
+
+            sample_hat = np.append(sample_hat, d, axis=1)
 
         return sample_hat
 
@@ -644,9 +735,12 @@ class PreprocessData:
 
             # Pick a random class from the probability distribution and then a random file with that class
             rand_class = np.random.choice(self.classes, p=self.prob_dist)
+            if rand_class == 'secondary_class':
+                rand_class_secondary = np.random.choice(self.secondary_classes)
+                file = np.random.choice(files_in_fold[files_in_fold.label == rand_class_secondary].slice_file_name)
+            else:
+                file = np.random.choice(files_in_fold[files_in_fold.label == rand_class].slice_file_name)
 
-            # Pick a random file with that class
-            file = np.random.choice(files_in_fold[self.df_v.label == rand_class].slice_file_name)
             file_path = f'../Datasets/audio/{self.audio_folder}/fold{testing_folds}/{file}'
 
             # Append to dict
@@ -695,7 +789,7 @@ class PreprocessData:
                 x.append(x_sample)
 
             # Normalize X and reshape the features
-            x = np.asarray(x)
+
             x = (x - _min) / (_max - _min)  # Normalize x and y
             if self.file_type == 'jpeg':
                 x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 3)  # Reshape all to same size - scalogram
@@ -745,6 +839,7 @@ class PreprocessData:
                 files_in_fold = self.df.loc[self.df.fold == fold[i]]
             elif mode == 'validation':
                 files_in_fold = self.df_v.loc[self.df_v.fold == validation_folds]
+            # Reset the indexes
 
             # Counter that checks if batch_size is reached
             counter = 0
@@ -752,8 +847,7 @@ class PreprocessData:
             for n in range(self.batch_size):
 
                 # Pick a random class from the probability distribution and then a random file with that class
-                rand_class = np.random.choice(self.classes, p=self.prob_dist)
-                file = np.random.choice(files_in_fold[self.df.label == rand_class].slice_file_name)
+                file, rand_class = self.get_filename(files_in_fold)
 
                 if mode == 'training':
                     file_path = f'../Datasets/audio/{self.audio_folder}/fold{fold[i]}/{file}'
@@ -789,11 +883,11 @@ class PreprocessData:
             # Normalize X and y and reshape the features
             y = np.asarray(y)
             x = np.array(x)
-            x = (x - _min) / (_max - _min)                              # Normalize x and y
+            x = (x - _min) / (_max - _min)  # Normalize x and y
             if self.file_type == 'jpeg':
-                x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 3)    # Reshape all to same size - scalogram
+                x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 3)  # Reshape all to same size - scalogram
             elif self.file_type == 'wav':
-                x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 1)    # Reshape all to same size - other features
+                x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 1)  # Reshape all to same size - other features
 
             # One-hot encode the labels and append
             y = to_categorical(y, num_classes=len(self.classes))
@@ -806,6 +900,62 @@ class PreprocessData:
 
             # Return data and labels
             yield x, y
+
+    def get_filename(self, files_in_fold):
+        """
+        Returns filename based on specifications given by the config.ini file.
+        :return:
+        """
+        rand_class = np.random.choice(self.classes, p=self.prob_dist)
+        # Check if two class problem
+        if rand_class == 'secondary_class':
+            rand_class_secondary = np.random.choice(self.secondary_classes)
+            file = np.random.choice(files_in_fold[files_in_fold.label == rand_class_secondary].slice_file_name)
+        else:
+            file = np.random.choice(files_in_fold[files_in_fold.label == rand_class].slice_file_name)
+            # Test random augmentation without expanding the training set
+            if self.test_augmentation is True:
+                if self.aug == 'noise_01':
+                    augmentation = np.random.choice(['.wav', '_noise_0.001.wav'],
+                                                    size=1, p=[0.7, 0.3])
+                elif self.aug == 'noise_05':
+                    augmentation = np.random.choice(['.wav', '_noise_0.005.wav'],
+                                                    size=1, p=[0.7, 0.3])
+                elif self.aug == 'time_shift':
+                    augmentation = np.random.choice(['.wav', '_time_shift_0.85.wav', '_time_shift_1.2.wav'],
+                                                    size=1, p=[0.7, 0.15, 0.15])
+
+                elif self.aug == 'pitch_shift':
+                    augmentation = np.random.choice(['.wav', '_pitch_shift_2.0.wav', '_pitch_shift_-2.0.wav'],
+                                                    size=1, p=[0.7, 0.15, 0.15])
+
+                file = re.sub('.wav', augmentation[0], file)
+                if augmentation[0] in self.augs.keys():
+                    self.augs[augmentation[0]] += 1
+                else:
+                    self.augs[augmentation[0]] = 1
+
+        return file, rand_class
+
+    def normalize_reshape_onehot(self, x, y, _min, _max):
+        """
+        Prepares teh data byt normalization, reshaping to three dimensions and one-hot encodes the labels.
+        :return:
+        """
+
+        # Normalize X and y and reshape the features
+        y = np.asarray(y)
+        x = np.array(x)
+        x = (x - _min) / (_max - _min)  # Normalize x and y
+        if self.file_type == 'jpeg':
+            x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 3)  # Reshape all to same size - scalogram
+        elif self.file_type == 'wav':
+            x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 1)  # Reshape all to same size - other features
+
+        # One-hot encode the labels and append
+        y = to_categorical(y, num_classes=len(self.classes))
+        return x, y
+
 
     @staticmethod
     def envelope(y, rate, threshold):
@@ -876,43 +1026,46 @@ class PreprocessData:
         Loops through all the sound files and applies a high pass filter
         :return:
         """
-        params = {'time_shift': self.time_shift_param, 'pitch_shift': self.pitch_shift_param}
-        import time
-        # Store in clean directory
-
+        # df = df[df.augmentation == 'pitch_shift']
+        df_aug = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_augmented_v2.csv')
+        noise_factor = self.noise_factor[0]
         for wav_file in tqdm(df.slice_file_name):
             # Find filename and filepath
             fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
             file_name = f'../Datasets/audio/downsampled/fold{fold}/{wav_file}'
 
             # Read file, monotize if stereo and resample
-            signal, sr = sf.read(file_name)
-            signal_hat = preprocessing.resample_signal(signal, orig_sr=sr, target_sr=target_sr)
 
-            # print(len(signal_hat)/8000)
-            # for deformation in self.augmentations:
-                # for param in params[deformation]:
-                #     signal_hat = self.deform_signal(signal, target_sr, deformation, param)
-                #
-                #     # Add the new file to the CSV file
-                #     row_info = df.loc[df['slice_file_name'] == wav_file]
-                #     org_name = re.findall('(.+).wav', wav_file)[0]
-                #     row_info['slice_file_name'] = f"{org_name}_{deformation}_{param}.wav"
-                #     row_info['length'] = len(signal_hat)/target_sr
-                #
-                #     df = df.append(row_info, ignore_index=True)
+            signal, sr = sf.read(file_name)
+            signal = preprocessing.resample_signal(signal, orig_sr=sr, target_sr=target_sr)
+            signal_hat = self.deform_signal(signal, sr, 'noise', noise_factor)
+
+            # Add the new file to the CSV file
+            row_info = df_aug.loc[df_aug['slice_file_name'] == wav_file]
+            org_name = re.findall('(.+).wav', wav_file)[0]
+            row_info['slice_file_name'] = f"{org_name}_noise_{noise_factor}.wav"
+            row_info['param'] = noise_factor
+            row_info['augmentation'] = 'noise'
+
+            df_aug = df_aug.append(row_info, ignore_index=True)
 
             # Write to file
-            wavfile.write(filename=f'../Datasets/audio/8Hz/fold{fold}/{wav_file}',
+            wavfile.write(filename=f'../Datasets/audio/augmented/fold{fold}/{org_name}_noise_{noise_factor}.wav',
                           rate=target_sr,
                           data=signal_hat)
 
-            # df.to_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_length_augmented.csv')
+        df_aug.to_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_augmented_v3.csv', index=False)
 
     @staticmethod
-    def add_noise(data):
+    def add_noise(data, param):
+        """
+        Adds random gaussian noise to the signal for augmentation purposes
+        :param data: signal time series
+        :param param: noise factor
+        :return:
+        """
         noise = np.random.randn(len(data))
-        data_noise = data + 0.005 * noise
+        data_noise = data + param * noise
         return data_noise
 
     def stretch_signal(self, data, rate=0.8):
@@ -936,20 +1089,21 @@ class PreprocessData:
         Parameters are adjusted in the config file under [augmentation].
         :param y: data
         :param sr: sample rate
-        :return: dict[time_shifts, pitch_shifts], dict([], []) if no params is set or both are set to False
+        :return: augmented time signal
         """
 
         # deformation = np.random.choice(self.augmentations)
 
         if deformation == 'time_shift':
-            param = np.random.choice(self.time_shift_param)
             y = pyrb.time_stretch(y, sr, param)
             # self.data_aug['downsampled'] += 1
 
         elif deformation == 'pitch_shift':
-            param = np.random.choice(self.pitch_shift_param)
             y = pyrb.pitch_shift(y, sr, param)
             # self.data_aug['downsampled'] += 1
+
+        elif deformation == 'noise':
+            y = self.add_noise(y, param)
 
         elif deformation == 'both':
             param1 = np.random.choice(self.pitch_shift_param)
@@ -964,109 +1118,96 @@ class PreprocessData:
         return y
 
 
+
 if __name__ == '__main__':
     """
-    Main function
+    Main function. Mainly used for testing the various methods and functions. Not for running actual training.
+    This is done by running train.py
     :return:
     """
-
-
-
-
-    # import scipy.signal as sig
-    # ax = np.arange(0, 1000)
-    # from math import exp
-    # voiceperocct = 10
-    # octaves = 5
-    # a0 = 2**(1/voiceperocct)
-    # fs = 16000
-    # scales = []
-    # len_of_scales = octaves*voiceperocct-voiceperocct
-
-        # a0 = a0**(octaves*voiceperocct)
-        # scales.append(a0)
-
-    # ax = np.arange(1, 151)
-
-    # scales = []
+    # import scipy.signal as siggy
+    # for a in [0.5, 1, 1.5]:
+    #     morlet = siggy.morlet(200, s=a)
+    #     plt.figure(figsize=(5, 2))
+    #     plt.title(f'\u03C8(t/{a})')
+    #     fig = plt.plot(morlet)
+    #     plt.savefig(f"C:/Users/toanb/Dropbox/Apps/Overleaf/Master thesis/Images/wavelet_scale_{a}.png")
+    #     plt.show()
     #
-    # scales2 = []
-    # for f, x in zip(freqs, ax):
-    #     scales.append(pywt.central_frequency('morl', 8)/f)
-    #     scales2.append(pywt.scale2frequency('morl', x, 8))
-
+    # exit()
     # Create dataframe
-    df = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_augmented.csv')
+    df = pd.read_csv('../Datasets/UrbanSound8K/metadata/UrbanSound8K_augmented_v3.csv')
 
     # Create a class distribution
     class_dist = df.groupby(['label'])['length'].mean()
 
     preprocessing = PreprocessData(df)
+
     # Fetch the classes from the CSV file
     classes = list(np.unique(df.label))
-    # save_scalograms(preprocessing, df)
-    # Dicts for things we want to store
-    signals = {}
-    mfccs = {}
-    filterbank = {}
-    f_bank = {}
-    fft = {}
-    mfccs_low = {}
-    filterbank_low = {}
-    mfccs_low_no_mask = {}
-    msfb_low_no_mask = {}
-    Sxx = {}
 
-    c = 'gun_shot'
-
-    classes = ['siren',
-               'gun_shot',
-               'jackhammer',
-               'street_music',
-               'children_playing',
-               'drilling',
-               'car_horn',
-               'air_conditioner',
-               'engine_idling',
-               'dog_bark']
-    plotting_functions.plot_performance(r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\exp2_three_diff_class\spectogram\run-.-tag-val_acc.csv', smoothing=0)
+    plotting_functions.plot_results()
     exit()
+    classes = ['siren']
 
+
+    features = ['librosa']
+    # for feature in features:
+    feature = 'librosa'
     for c in classes:
         # Get the file name and the fold it exists in from the dataframe
         wav_file = df[df.label == c].iloc[0, 0]
         fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
         length = df.loc[df['slice_file_name'] == wav_file, 'length'].iloc[0]
         target_sr = 16000
-        file_path = f'../Datasets/audio/{preprocessing.audio_folder}/fold{fold}/{wav_file}'
+
+        file_path = f'../Datasets/audio/{feature}/fold{fold}/{wav_file}'
         # Read signal and add it to dict.
-        signal, sr = sf.read(f'../Datasets/audio/augmented/fold{fold}/{wav_file}')
+        # signal, sr = sf.read(f'../Datasets/audio/img/fold{fold}/{wav_file}')
+        # plt.title(c)
+        # plt.plot(signal)
+        x = []
+        _min, _max = float('inf'), -float('inf')
+        image_jpeg = preprocessing.extract_feature(file_path, 'librosa', random_extraction=False,
+                                              activate_threshold=False, file_type='jpeg', delta_delta=False)
+        preprocessing.grayscale = True
+        image_gray = preprocessing.extract_feature(file_path, 'librosa', random_extraction=False,
+                                                   activate_threshold=False, file_type='jpeg', delta_delta=False)
+        file_path = f'../Datasets/audio/augmented/fold{fold}/{wav_file}'
+        image_wav = preprocessing.extract_feature(file_path, 'librosa', random_extraction=False,
+                                                   activate_threshold=False, file_type='wav', delta_delta=False)
 
-        feature = preprocessing.extract_feature(file_path, 'spectogram', random_extraction=False)
+        _min = min(np.amin(image_jpeg), _min)
+        _max = max(np.amax(image_jpeg), _max)
+        image_jpeg = (image_jpeg - _min) / (_max - _min)
+        _min = min(np.amin(image_gray), _min)
+        _max = max(np.amax(image_gray), _max)
+        image_gray = (image_gray - _min) / (_max - _min)
+        _min = min(np.amin(image_wav), _min)
+        _max = max(np.amax(image_wav), _max)
+        image_wav = (image_wav - _min) / (_max - _min)
+        x.append(image_jpeg)
+        x.append(image_gray)
+        x.append(image_wav)
 
+        # x = (x - _min) / (_max - _min)  # Normalize x and y
 
-
-
-        # signal, sr = sf.read('C:/Users/toanb/OneDrive/skole/UiO/Master/Datasets/audio/augmented/fold1/7383-3-0-0.wav')
-        file = r'C:\Users\toanb\OneDrive\skole\UiO\Master\Datasets\Audio-Classification-master\wavfiles\0c67f402.wav'
-        jam = jams.JAMS()
-        jam.file_metadata.duration = length
-        # Make empty jams
-        j_orig = muda.load_jam_audio(jams.JAMS(), file)
-
-        file_bg = r'C:\Users\toanb\OneDrive\skole\UiO\Master\Datasets\urbansounds_jams\UrbanSound8K-JAMS\background_noise\150993__saphe__street-scene-1.wav'
-
-        background = muda.deformers.BackgroundNoise(1, file_bg)
-        jam_out = background.transform(j_orig)
-        # jam_out.sandbox.muda._audio
-        # sf.write("bikkje.wav", jam_out, samplerate=16000)
-        muda.save("test.wav", 'test.jam', jam_out)
+        for image in x:
+            plt.grid()
+            plt.imshow(image)
+            plt.show()
 
         exit()
 
-        # feature_scalo = preprocessing.extract_feature(signal, sr, 'scalogram', random_extraction=False)
+
+
+
+
+
+
 
     exit()
+
 
 
 
