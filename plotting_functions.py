@@ -12,8 +12,8 @@ import numpy as np
 import pandas as pd
 import seaborn as sns # data visualization library
 import re
-plt.style.use('ggplot')
-
+# plt.style.use('ggplot')
+#
 
 def hamming_window():
     """
@@ -106,16 +106,16 @@ def plot_results():
     """
     mode = 'box'
 
-    f =   r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\augmentation\librosa2\time shift\run-.-tag-' + f'val_acc.csv'
-    for metric in ['acc', 'loss', 'val_acc', 'val_loss']:
+    f =   r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\engine_idling\spectrogram\run-.-tag-' + f'val_acc.csv'
+    for metric in ['loss', 'val_acc', 'val_loss']:
 
         # ' + f'{metric}.csv'
-        file_path_clean =           r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\augmentation\librosa_add\clean\run-.-tag-' + f'{metric}.csv'
+        file_path_clean =           r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\augmentation\librosa2\clean\run-.-tag-' + f'{metric}.csv'
         file_path_time_shift_add =      r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\augmentation\librosa_add\time shift\run-.-tag-' + f'{metric}.csv'
         file_path_pitch_shift_add =   r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\augmentation\librosa_add\pitch shift\run-.-tag-' + f'{metric}.csv'
         file_path_noise05_add =   r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\augmentation\librosa_add\noise 0.005\run-.-tag-' + f'{metric}.csv'
         file_path_nosie01 =      r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\augmentation\librosa_add\noise 0.001\run-.-tag-' + f'{metric}.csv'
-        file_path_asym_msfb =       r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\asym_reg\msfb asym\run-.-tag-' + f'{metric}.csv'
+        file_path_asym_msfb =       r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\asym_reg\scalogram delta\run-.-tag-' + f'{metric}.csv'
         file_path_clean_scalogram = r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\asym_reg\scalogram clean\run-.-tag-' + f'{metric}.csv'
         file_path_asym_scalogram =       r'C:\Users\toanb\OneDrive\skole\UiO\Master\code\experiments_results\asym_reg\scalogram asym\run-.-tag-' + f'{metric}.csv'
 
@@ -129,12 +129,15 @@ def plot_results():
                      # file_path_clean_scalogram,
                      # file_path_asym_scalogram
                      ]
-
+        bikkje = ['replace', 'add']
         # values_only = pd.merge(mfcc, scalogram, on='Step')
         values_only = {}
         if mode == 'box':
-            for file in csv_files:
-                feature = re.findall(r"librosa_add\\(.*)\\run", file)[0]
+            for i, file in enumerate(csv_files):
+                if i == 0:
+                    feature = re.findall(r"librosa2\\(.*)\\run", file)[0]
+                else:
+                    feature = re.findall(r"librosa_add\\(.*)\\run", file)[0]
                 data = apply_smoothing(pd.read_csv(file).Value, smoothing)
                 if feature == 'librosa':
                     feature = 'msfb - 128'
@@ -144,7 +147,7 @@ def plot_results():
                     feature = 'msfb - 26'
                 elif feature == 'scalogram2':
                     feature = 'scalogram'
-                elif feature == 'spectogram':
+                elif feature == 'spectogram' or feature == 'spectogram2':
                     feature = 'spectrogram'
                 elif feature == 'mfcc2':
                     feature = 'mfcc'
@@ -157,14 +160,16 @@ def plot_results():
                     feature = '\u03BC = 0.001'
                 elif feature == 'pitch_shift2':
                     feature = 'pitch shift'
-
+                if feature == 'noise 0.005':
+                    data = data
                 values_only[feature] = data
             values_only = pd.DataFrame(values_only)
-
-
         else:
-            for file in csv_files:
-                featre = feature = re.findall(r"librosa2\\(.*)\\run", file)[0]
+            smoothing = 12
+            # bikkje = ['replace', 'add']
+            for i, file in enumerate(csv_files):
+                feature = re.findall(r"librosa_add\\(.*)\\run", file)[0]
+                # feature = bikkje[i]
                 if feature == 'clean':
                     plot_performance(file,
                                      smoothing=smoothing,
@@ -177,26 +182,6 @@ def plot_results():
                                      column_name=feature,
                                      style='--',
                                      f=f)
-            # plot_performance(file_path_msfb_26,
-            #                  smoothing=smoothing,
-            #                  column_name='msfb-26',
-            #                  color='purple',
-            #                  style='-', f=f)
-            # plot_performance(file_path_scalogram,
-            #                  smoothing=smoothing,
-            #                  column_name='scalogram',
-            #                  color='g',
-            #                  style='-', f=f)
-            # plot_performance(file_path_spectogram,
-            #                  smoothing=smoothing,
-            #                  column_name='spectrogram',
-            #                  color='b',
-            #                  style='-', f=f)
-            # plot_performance(file_path_msfb_128,
-            #                  smoothing=smoothing,
-            #                  column_name='msfb-128',
-            #                  color='orange',
-            #                  style='-', f=f)
 
         if mode == 'box':
             if metric == 'val_acc' or metric == 'acc':
@@ -211,15 +196,15 @@ def plot_results():
                 if metric == 'loss':
                     metric = 'train_loss'
 
-            file_path_img = f"C:/Users/toanb/Dropbox/Apps/Overleaf/Master thesis/result_images/BOX_{metric}_aug_add.png"
+            file_path_img = f"C:/Users/toanb/Dropbox/Apps/Overleaf/Master thesis/result_images/BOX_{metric}_engine2.png"
             ax = sns.boxplot(data=values_only)
-            ax.set_xticklabels(ax.get_xticklabels(), fontsize=14, color='black',
+            ax.set_xticklabels(ax.get_xticklabels(), fontsize=15, color='black',
                                rotation=40, ha="right",
                                )
             plt.tight_layout()
             rc = {'axes.labelsize': 40, 'font.size': 40, 'legend.fontsize': 40, 'axes.titlesize': 40}
             sns.set(rc=rc)
-            plt.savefig(file_path_img)
+            # plt.savefig(file_path_img)
             plt.show()
             print(f"image saved: {file_path_img}")
             # plt.close()
@@ -231,19 +216,19 @@ def plot_results():
             plt.ylabel('Accuracy', size=15)
             metric = 'train_acc'
         elif metric == 'val_acc':
-            plt.title('Validation Accuracy', size=15)
+            plt.title('Validation - Accuracy', size=15)
             plt.ylabel('Accuracy', size=15)
         elif metric == 'loss':
             plt.title('Training Loss', size=15)
             plt.ylabel('Loss', size=15)
             metric = 'train_loss'
         elif metric == 'val_loss':
-            plt.title('Validation Loss', size=15)
+            plt.title('Validation - Loss', size=15)
             plt.ylabel('Loss', size=15)
         plt.xlabel('Epoch', size=15)
 
 
-        file_path_img = f"C:/Users/toanb/Dropbox/Apps/Overleaf/Master thesis/result_images/{metric}_aug_add_graph.png"
+        file_path_img = f"C:/Users/toanb/Dropbox/Apps/Overleaf/Master thesis/result_images/{metric}_adding_aug.png"
 
         plt.savefig(file_path_img)
         plt.show()
@@ -313,19 +298,7 @@ def plot_fbank(fbank):
             i += 1
 
 
-def cool_box_plots(sns):
-    fig, axes = plt.subplots(1, 2, figsize=(20, 5))
-
-    # Original
-    ax = sns.boxplot(data=X_numeric, ax=axes[0])
-    ax = sns.swarmplot(data=X_numeric, color='.35', size=4, ax=axes[0])
-
-    # Preprocessed
-    ax = sns.boxplot(data=X_preprocessed, ax=axes[1])
-    ax = sns.swarmplot(data=X_preprocessed, color='.35', size=4, ax=axes[1])
-
-
-def plot_spectrogram_with_cool_axes(signal, sr, spectrogram):
+def plot_spectrogram_with_cool_axes(signal, sr, spectrogram, c):
     """
     so cool
     :param signal:
@@ -333,23 +306,73 @@ def plot_spectrogram_with_cool_axes(signal, sr, spectrogram):
     :param spectrogram:
     :return:
     """
-    fig, ax = plt.subplots(2, 1, sharex=False, sharey=False, figsize=(6, 5))
-    plt.grid()
+    fig, ax = plt.subplots(1, 2, sharex=False,
+                           sharey=False,
+                           figsize=(6, 5),
+                           )
+
+    # plt.gca().set_aspect('equal', adjustable='box')
     # ax[0] = fig.add_axes([0.1, 0.75, 0.7, 0.2])  # [left bottom width height]
+    # ax[0] = plt.subplot(211)
+    # ax[1] = plt.subplot(212)
+    plt.grid(False)
+    steps = np.linspace(0, 4, len(signal))
+    ax[0].set_title(fix_title(c))
+    ax[0].axes.set_xlim([0, 4])
+    ax[0].plot(steps, signal, color='black')
+    plt.grid(False)
+    steps = np.linspace(0, 4, len(signal))
+    ax[0].set_title(fix_title(c))
+    ax[0].axes.set_xlim([0, 4])
+    ax[0].plot(steps, signal, color='black')
 
-    ax[0].axes.set_xlim([0, len(signal)])
-    ax[0].plot(signal, color='black')
-    ax[0].set_ylabel('Amplitude')
-    ax[0].set_xlabel('Time [seconds]')
-    ax[1].set_ylabel('Frequency [Hz]')
-    ax[1].set_xlabel('Time [Frames]')
-    busk = ax[1].imshow(spectrogram)
-    # pxx, freq, t, cax = plt.specgram(signal, Fs=16000, NFFT=512, window=np.hamming(512), axes=ax[1])
+    ax[0].set_ylabel('Amplitude', color='black')
+    ax[0].set_xlabel('Time [seconds]', color='black')
+    # ax[0].get_xaxis().set_visible(False)
+    ax[1].set_ylabel('Frequency [Hz]', color='black')
+    ax[1].set_xlabel('Time [seconds]', color='black')
 
-    fig.colorbar(busk).set_label('Power [dB]')
-
+    ax[1].specgram(signal, Fs=sr,
+                                 # NFFT=512, window=np.hamming(512), axes=ax[1]
+                                  )
+    # ax[2].set_ylabel('Filters', color='black')
+    # ax[2].set_xlabel('Time [Frames]', color='black')
+    # busk1 = ax[2].imshow(spectrogram[0])
+    # ax[3].set_ylabel('Coeffs', color='black')
+    # ax[3].set_xlabel('Time [Frames]', color='black')
+    # busk = ax[3].imshow(spectrogram[1])
+    #
+    # # fig.colorbar(busk1).set_label('Power [dB]')
+    # plt.tight_layout()
     plt.show()
-    exit()
+
+
+def fix_title(c):
+    """
+    Converts the lower case class of UrbanSound to Upper Case with space instead of underbar
+    :param c:
+    :return:
+    """
+    if c == 'children_playing':
+        return 'Children Playing'
+    elif c == 'gun_shot':
+        return 'Gun Shot'
+    elif c == 'car_horn':
+        return 'Car Horn'
+    elif c == 'jackhammer':
+        return 'Jackhammer'
+    elif c == 'drilling':
+        return 'Drilling'
+    elif c == 'siren':
+        return 'Siren'
+    elif c == 'dog_bark':
+        return 'Dog Bark'
+    elif c == 'street_music':
+        return 'Street Music'
+    elif c == 'air_conditioner':
+        return 'Air Conditioner'
+    elif c == 'engine_idling':
+        return 'Engine Idling'
 
 
 def plot_mfccs(mfccs):

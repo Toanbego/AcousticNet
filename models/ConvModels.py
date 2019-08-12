@@ -85,7 +85,7 @@ def novel_cnn(input_shape, num_classes, optimizer):
     model.add(LeakyReLU())
 
     # CNN - 4 - Conv
-    model.add(Conv2D(128, 2, strides=2,
+    model.add(Conv2D(128, 1, strides=1,
                      kernel_regularizer=l2(0.001),
                      padding='same', ))
     model.add(LeakyReLU())
@@ -118,7 +118,7 @@ def novel_cnn_asym(input_shape, num_classes, optimizer):
     model = Sequential()
 
     # CNN - 1 - Conv
-    model.add(Conv2D(16, (2, 3), strides=(2, 3),
+    model.add(Conv2D(16, (1, 3), strides=(1, 3),
                      padding='same',
                      kernel_regularizer=l2(0.001),
                      input_shape=input_shape
@@ -132,7 +132,7 @@ def novel_cnn_asym(input_shape, num_classes, optimizer):
     model.add(LeakyReLU())
 
     # CNN - 3 - Conv
-    model.add(Conv2D(64, (1, 2), strides=(1, 2),
+    model.add(Conv2D(64, (2, 2), strides=(2, 2),
                      kernel_regularizer=l2(0.001),
                      padding='same', ))
     model.add(LeakyReLU())
@@ -143,14 +143,14 @@ def novel_cnn_asym(input_shape, num_classes, optimizer):
                      padding='same', ))
     model.add(LeakyReLU())
     # model.add(MaxPool2D(2, 2))
-    model.add(Dropout(0.1))
+    model.add(Dropout(0.3))
     # model.add(BatchNormalization())
 
     # CNN - 5 - FCC
     model.add(Flatten())
     model.add(Dense(64))
     model.add(LeakyReLU())
-    # model.add(Dense(64))
+    # model.add(Dense(512))
     # model.add(LeakyReLU())
     # model.add(Dense(64))
     # model.add(LeakyReLU())

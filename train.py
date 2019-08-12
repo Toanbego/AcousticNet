@@ -16,7 +16,11 @@ from keras.callbacks import ModelCheckpoint, TensorBoard
 from sklearn.utils.class_weight import compute_class_weight, compute_sample_weight
 import keras.optimizers
 import keras.backend as backend
-
+from keras.applications import resnet50, MobileNet
+from keras.layers import Dense,GlobalAveragePooling2D
+from keras.preprocessing import image
+from keras.applications.mobilenet import preprocess_input
+from keras.preprocessing.image import ImageDataGenerator
 # Miscellaneous
 from tqdm import tqdm
 
@@ -122,22 +126,42 @@ class TrainAudioClassificator(PreprocessData):
         Methods compiles the specified model. Currently only CNN is available.
         :return:
         """
-
-        # Load a predefined network
-        if self.load_weights is True:
-            self.model = load_model(self.load_model_path)
+        num_classes = y.shape[1]
+        transfer_learning = False
+        if transfer_learning is True:
+            # base_model = resnet50.ResNet50(include_top=False)
+            base_model = MobileNet(weights='alexnet', include_top=False)
+            x = base_model.output
+            x = GlobalAveragePooling2D()(x)
+            x = Dense(512, activation='relu')(
+                x)  # we add dense layers so that the model can learn more complex functions and classify for better results.
+            # x = Dense(1024, activation='relu')(x)  # dense layer 2
+            x = Dense(64, activation='relu')(x)  # dense layer 3
+            preds = Dense(num_classes, activation='softmax')(x)  # final layer with softmax activation
+            self.model = keras.Model(inputs=base_model.input, outputs=preds)
+            for layer in self.model.layers[:-3]:
+                layer.trainable = False
+            for layer in self.model.layers:
+                print(layer.trainable)
+            self.model.compile(optimizer='Adam', loss='categorical_crossentropy', metrics=['accuracy'])
             self.model.summary()
-
-        # Define input shape and compile model
+            # exit()
         else:
-            num_classes = y.shape[1]
-            if self.file_type == 'jpeg':
-                input_shape = (x.shape[1], x.shape[2], 3)
-            elif self.file_type =='wav':
-                input_shape = (x.shape[1], x.shape[2], 1)
+            # Load a predefined network
+            if self.load_weights is True:
+                self.model = load_model(self.load_model_path)
+                self.model.summary()
 
-            self.model = CNN.fetch_network(self.network_architecture,
-                                           input_shape, num_classes, self.optimizer)
+            # Define input shape and compile model
+            else:
+                num_classes = y.shape[1]
+                if self.file_type == 'jpeg':
+                    input_shape = (x.shape[1], x.shape[2], 3)
+                elif self.file_type =='wav':
+                    input_shape = (x.shape[1], x.shape[2], 1)
+
+                self.model = CNN.fetch_network(self.network_architecture,
+                                               input_shape, num_classes, self.optimizer)
 
         # Set up tensorboard and checkpoint monitoring
         tb_callbacks = TensorBoard(log_dir='./logs', histogram_freq=0, batch_size=self.batch_size, write_graph=True,
@@ -269,6 +293,47 @@ class TrainAudioClassificator(PreprocessData):
                 print(matrix)
                 print(accuracy)
 
+        elif mode == 'evaluate_performance':
+            accs = []
+            conf_matrices = []
+            mious = []
+
+            weights = config['model']['weights'].replace('\n', '').split(',')[:-1]
+
+            seed = np.random.randint(0, 10000, 15)
+
+            # Loop through the saved weights
+            for weight in weights:
+                name_of_run = re.findall(r'.\\(.*)\\weights', weight)
+                self.feature = re.findall(r"\d\d_(.*)_fold", weight)[0]
+                self.audio_folder = self.feature
+                model = load_model(weight)
+                # Generate labels for the test set which is used to generate the test set.
+                data = self.generate_labels(seed)
+                y_pred = []
+
+                # Run predictions on the test folds
+                prediction = model.predict_generator(self.generate_data_for_predict_generator(data),
+                                                     steps=steps,
+                                                     verbose=1,
+                                                     )
+                # Decode from one-hot encoding
+                prediction = np.argmax(prediction, axis=1)
+                for pred in prediction:
+                    y_pred.append(self.classes[pred])
+
+                matrix, accuracy, miou = self.evaluate_performance_of_test(data, y_pred)
+                print(name_of_run)
+                print(self.classes)
+                print(f'Confusion matrix:\n{matrix}')
+                print(f'Accuracy: {accuracy}')
+                print(f'MIoU: {miou}\n')
+
+                backend.clear_session()
+                accs.append(np.trace(matrix) / np.sum(matrix))
+                conf_matrices.append(matrix)
+                mious.append(miou)
+
     def evaluate_performance_of_test(self, data, y_pred):
         """
         Calculates confusion matrix and mean Intersect Over Union
@@ -316,7 +381,7 @@ def run(audio_model):
     if audio_model.network_mode == 'train_network':
 
         # Generate a sample of the data to use as setup for the model
-        audio_model.batch_size = 500
+        audio_model.batch_size = 250
         x_train, y_train = next(audio_model.preprocess_dataset_generator(mode='training'))
         audio_model.batch_size = config['model'].getint('batch_size')
 

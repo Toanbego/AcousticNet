@@ -396,7 +396,7 @@ class PreprocessData:
 
         if self.file_type == 'wav':
             self.random_extraction = True
-            self.step_length = 3
+            # self.step_length = 3
             self.sample_length = int(self.rate * self.step_length)  # Given in samples
             assert self.step_length <= config['preprocessing'].getfloat('signal_minimum_length'), \
                 f'step_length is larger than signal_length. ' \
@@ -546,6 +546,13 @@ class PreprocessData:
         Apply various preprocessing on a time series signal
         :return:
         """
+
+        # Perform filtering with a threshold on the time signal
+        if activate_threshold is True:
+            sample = sigproc.preemphasis(sample, 0.95)
+            mask = self.envelope(sample, rate, self.threshold)
+            sample = sample[mask]
+
         if random_extraction is True:
             # Choose a window of the signal to use for the sample
             try:
@@ -556,10 +563,7 @@ class PreprocessData:
                 print("audio file to small. Skip and move to next")
                 return 'move to next file'
 
-        # Perform filtering with a threshold on the time signal
-        if activate_threshold is True:
-            mask = self.envelope(sample, rate, self.threshold)
-            sample = sample[mask]
+
 
         if augmentation == 'pitch_shift' or augmentation == 'time_shift' or augmentation == 'noise':
             sample = self.deform_signal(sample, rate, augmentation, aug_param)
@@ -598,6 +602,8 @@ class PreprocessData:
                                             sample, rate,
                                             seed, activate_threshold,
                                             augmentation, aug_param)
+            if sample == 'move to next file':
+                return sample
 
         # If file is jpeg file
         elif self.file_type == 'jpeg':
@@ -606,7 +612,6 @@ class PreprocessData:
                 sample_hat = np.asarray(sample)
                 if self.grayscale == True:
                     sample_hat = cv2.cvtColor(sample_hat, cv2.COLOR_BGR2GRAY)
-
 
             if random_extraction is True:
                 # Choose a window of the signal to use for the sample
@@ -659,7 +664,7 @@ class PreprocessData:
         # Extract the log of the power spectrum
         elif feature_to_extract == 'spectogram':
             if self.file_type == 'wav':
-                sample = sigproc.preemphasis(sample, 0.97)
+                sample = sigproc.preemphasis(sample, 0.95)
                 _, _, Sxx = spectrogram(sample, rate, noverlap=240,
                                                nfft=self.n_fft,
                                                window=get_window('hamming', 400, self.n_fft))
@@ -673,13 +678,18 @@ class PreprocessData:
 
         elif feature_to_extract == 'librosa':
             if self.file_type == 'wav':
-                sample = librosa.feature.melspectrogram(sample, rate, n_fft=1200, hop_length=512)
-                sample_hat = np.log(sample)
+                try:
+                    sample = librosa.feature.melspectrogram(sample, rate, n_fft=1200, hop_length=512)
+                    sample_hat = np.log(sample)
+                except ValueError:
+                    return 'move to next file'
             elif self.file_type == 'jpeg':
                 width = 126
                 height = 128
                 dim = (width, height)
+                # dim = (224, 224)
                 sample_hat = cv2.resize(sample_hat, dim, interpolation=cv2.INTER_AREA)
+
 
         # Extract the wavelet transform of the signal at different scales
         elif feature_to_extract == 'scalogram':
@@ -689,8 +699,8 @@ class PreprocessData:
 
             elif self.file_type == 'jpeg':
                 # Due to a scaling error, 4 scales needs to be dropped in height
-                width = 500
-                height = 141
+                width = 400
+                height = 400
                 dim = (width, height)
                 sample_hat = cv2.resize(sample_hat, dim, interpolation=cv2.INTER_AREA)
 
@@ -792,9 +802,12 @@ class PreprocessData:
 
             x = (x - _min) / (_max - _min)  # Normalize x and y
             if self.file_type == 'jpeg':
-                x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 3)  # Reshape all to same size - scalogram
+                if self.feature == 'spectogram':
+                    x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 1)
+                else:
+                    x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 3)  # Reshape all to same size
             elif self.file_type == 'wav':
-                x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 1)  # Reshape all to same size - other features
+                x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 1)  # Reshape all to same size
 
             n += self.batch_size_for_test
             yield x
@@ -904,6 +917,7 @@ class PreprocessData:
     def get_filename(self, files_in_fold):
         """
         Returns filename based on specifications given by the config.ini file.
+        Also apparently performs augmentations, but you know...
         :return:
         """
         rand_class = np.random.choice(self.classes, p=self.prob_dist)
@@ -928,8 +942,15 @@ class PreprocessData:
                 elif self.aug == 'pitch_shift':
                     augmentation = np.random.choice(['.wav', '_pitch_shift_2.0.wav', '_pitch_shift_-2.0.wav'],
                                                     size=1, p=[0.7, 0.15, 0.15])
-
+                elif self.aug == 'pitch_shift':
+                    augmentation = np.random.choice(['.wav', '_pitch_shift_2.0.wav', '_pitch_shift_-2.0.wav', '_noise_0.005.wav'],
+                                                    size=1, p=[0.625, 0.125, 0.125, 0.125])
+                else:
+                    raise ValueError('Please choose an existing augmentation!')
                 file = re.sub('.wav', augmentation[0], file)
+
+
+
                 if augmentation[0] in self.augs.keys():
                     self.augs[augmentation[0]] += 1
                 else:
@@ -948,7 +969,8 @@ class PreprocessData:
         x = np.array(x)
         x = (x - _min) / (_max - _min)  # Normalize x and y
         if self.file_type == 'jpeg':
-            x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 3)  # Reshape all to same size - scalogram
+            x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 1)  # Reshape all to same size - scalogram
+
         elif self.file_type == 'wav':
             x = x.reshape(x.shape[0], x.shape[1], x.shape[2], 1)  # Reshape all to same size - other features
 
@@ -1146,67 +1168,134 @@ if __name__ == '__main__':
     # Fetch the classes from the CSV file
     classes = list(np.unique(df.label))
 
-    plotting_functions.plot_results()
-    exit()
-    classes = ['siren']
+    # plotting_functions.plot_results()
+    # exit()
+    classes = ['gun_shot', 'street_music',
+               'siren', 'dog_bark', 'jackhammer', 'drilling', 'children_playing',
+               'air_conditioner', 'car_horn', 'engine_idling'
+               ]
 
 
-    features = ['librosa']
+    signals = {}
     # for feature in features:
-    feature = 'librosa'
+    feature = ['spectogram', 'scalogram']
     for c in classes:
+
         # Get the file name and the fold it exists in from the dataframe
         wav_file = df[df.label == c].iloc[0, 0]
         fold = df.loc[df['slice_file_name'] == wav_file, 'fold'].iloc[0]
         length = df.loc[df['slice_file_name'] == wav_file, 'length'].iloc[0]
         target_sr = 16000
 
-        file_path = f'../Datasets/audio/{feature}/fold{fold}/{wav_file}'
+        file_path = f'../Datasets/audio/downsampled/fold{fold}/{wav_file}'
+
+
+
         # Read signal and add it to dict.
-        # signal, sr = sf.read(f'../Datasets/audio/img/fold{fold}/{wav_file}')
-        # plt.title(c)
-        # plt.plot(signal)
-        x = []
-        _min, _max = float('inf'), -float('inf')
-        image_jpeg = preprocessing.extract_feature(file_path, 'librosa', random_extraction=False,
-                                              activate_threshold=False, file_type='jpeg', delta_delta=False)
-        preprocessing.grayscale = True
-        image_gray = preprocessing.extract_feature(file_path, 'librosa', random_extraction=False,
-                                                   activate_threshold=False, file_type='jpeg', delta_delta=False)
-        file_path = f'../Datasets/audio/augmented/fold{fold}/{wav_file}'
-        image_wav = preprocessing.extract_feature(file_path, 'librosa', random_extraction=False,
-                                                   activate_threshold=False, file_type='wav', delta_delta=False)
+        # signal, sr = sf.read(file_path)
+        # signal = preprocessing.make_signal_mono(signal)
+        signal = preprocessing.extract_feature(file_path, 'mfcc', random_extraction=False, file_type='wav')
+        # signals[f] = signal
+        plt.title(plotting_functions.fix_title(c))
+        plt.imshow(signal, cmap='hot', origin='lower')
+        # plt.show()
+        plt.savefig(f"C:/Users/toanb/OneDrive/skole/UiO/Master/presentasjon/bilder/{c}_mfcc.png")
+        print('Saved Figure:', plotting_functions.fix_title(c))
+        plt.close()
+        continue
 
-        _min = min(np.amin(image_jpeg), _min)
-        _max = max(np.amax(image_jpeg), _max)
-        image_jpeg = (image_jpeg - _min) / (_max - _min)
-        _min = min(np.amin(image_gray), _min)
-        _max = max(np.amax(image_gray), _max)
-        image_gray = (image_gray - _min) / (_max - _min)
-        _min = min(np.amin(image_wav), _min)
-        _max = max(np.amax(image_wav), _max)
-        image_wav = (image_wav - _min) / (_max - _min)
-        x.append(image_jpeg)
-        x.append(image_gray)
-        x.append(image_wav)
-
-        # x = (x - _min) / (_max - _min)  # Normalize x and y
-
-        for image in x:
-            plt.grid()
-            plt.imshow(image)
-            plt.show()
-
+        frames = sigproc.framesig(signal, 0.025 * sr, 0.01 * sr, lambda x: np.ones((x,)))
+        pspec = np.square(sigproc.magspec(frames, 1200))
+        plt.imshow(np.log(pspec))
+        plt.show()
         exit()
 
 
 
+        signal_pre = sigproc.preemphasis(signal, 0.95)
+        frames_pre = sigproc.framesig(signal_pre, 0.025 * sr, 0.01* sr, lambda x:np.ones((x,)))
+        pspec_pre = sigproc.powspec(frames_pre, 1200)
+
+
+        frames_pre2 = sigproc.framesig(signal, 0.025 * sr, 0.01 * sr, lambda x: np.ones((x,)))
+        pspec_pre2 = sigproc.powspec(frames_pre2, 1200)
+        pspec_pre2 = 1 - (0.95)*1/pspec_pre2
+
+        energy = np.sum(pspec, 1)  # this stores the total energy in each frame
+        energy = np.where(energy == 0, np.finfo(float).eps, energy)  # if energy is zero, we get problems with log
+
+        energy2 = np.sum(pspec_pre2, 1)  # this stores the total energy in each frame
+        energy2 = np.where(energy2 == 0, np.finfo(float).eps, energy)  # if energy is zero, we get problems with log
+        energy3 = np.sum(pspec_pre, 1)  # this stores the total energy in each frame
+        energy3 = np.where(energy3 == 0, np.finfo(float).eps, energy)  # if energy is zero, we get problems with log
+        # plt.plot(pspec)
+        # plt.show()
+        # plt.plot(pspec_pre)
+        # plt.show()
+        # plt.plot(pspec_pre2)
+        # plt.show()
+        # exit()
+        fig, ax = plt.subplots(1, 2, sharex=False,
+                               sharey=False,
+                               # figsize=(5, 5),
+                               )
+        fig.subxlabel('Time [seconds]', size=15, color='black')
+        ax[0].set_title('Before pre-emphasis', size=16, color='black')
+        busk1 = ax[0].imshow(np.log(pspec.T), cmap='hot')
+
+        ax[0].set_ylabel('Frequency', color='black', size=15)
+        # ax[0].set_xlabel('Time [frames]', color='black', size=15)
+
+        ax[1].set_title('After pre-emphasis', size=16, color='black')
+        busk1 = ax[1].imshow(np.log(pspec_pre.T), cmap='hot')
+
+        # ax[1].set_ylabel('Frequency', color='black', size=15)
+        # ax[1].set_xlabel('Time [frames]', color='black', size=15)
+
+        # ax[2].set_title('After pre-emphasis', size=16, color='black')
+        # busk1 = ax[2].imshow(np.log(pspec_pre2.T), cmap='hot')
+        #
+        # ax[2].set_ylabel('Frequency', color='black', size=15)
+        # ax[2].set_xlabel('Time [frames]', color='black', size=15)
+
+        file_path = r'C:\Users\toanb\Dropbox\Apps\Overleaf\Master thesis\Images\pre_emphasis_spectrogram'
+        plt.savefig(r'C:\Users\toanb\Dropbox\Apps\Overleaf\Master thesis\Images\pre_emphasis_spectrogram')
+        print(f'Save figure as {file_path}')
+        plt.tight_layout()
+        plt.show()
+
+
+        exit()
+
+    # fig, ax = plt.subplots(1, 2, sharex=False,
+    #                        sharey=False,
+    #                        figsize=(8, 5),
+    #                        )
+    # # fig.suptitle('Gun Shot class', size=20)
+    # for i, signal in enumerate(signals):
+    #
+    #     plt.grid()
+    #     steps = np.linspace(0, 4, len(signals[signal]))
+    #     ax[i].set_title(signal, size=16, color='black')
+    #     ax[i].imshow(signals[signal], cmap='hot')
+    #     if signal == 'scalogram':
+    #         ax[i].set_ylabel('Scales', color='black', size=15)
+    #     else:
+    #         ax[i].set_ylabel('Frequency', color='black', size=15)
+    #     ax[i].set_xlabel('Time [seconds]', color='black', size=15)
+    # plt.show()
 
 
 
 
 
-    exit()
+
+
+
+
+
+
+
 
 
 
